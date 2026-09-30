@@ -1,3 +1,4 @@
+```python
 import os
 import discord
 from discord.ext import commands
@@ -16,10 +17,8 @@ bot = commands.Bot(
 # CONFIGURACIÓN
 # =========================
 
-WELCOME_CHANNEL_ID = 0
-GOODBYE_CHANNEL_ID = 0
-TICKET_CATEGORY_ID = 0
-STAFF_ROLE_ID = 0
+WELCOME_CHANNEL_ID = 1548521317295198258
+TICKET_CATEGORY_ID = 1548528404649873438
 
 
 # =========================
@@ -38,32 +37,11 @@ async def on_ready():
 @bot.event
 async def on_member_join(member):
 
-    if WELCOME_CHANNEL_ID == 0:
-        return
-
     channel = bot.get_channel(WELCOME_CHANNEL_ID)
 
     if channel:
         await channel.send(
-            f"Bienvenido/a {member.mention} a **InfernMc**."
-        )
-
-
-# =========================
-# DESPEDIDAS
-# =========================
-
-@bot.event
-async def on_member_remove(member):
-
-    if GOODBYE_CHANNEL_ID == 0:
-        return
-
-    channel = bot.get_channel(GOODBYE_CHANNEL_ID)
-
-    if channel:
-        await channel.send(
-            f"**{member.name}** ha salido de InfernMc."
+            f"¡Bienvenido/a al servidor, {member.mention}! 🎉"
         )
 
 
@@ -99,7 +77,7 @@ class TicketView(discord.ui.View):
             )
             return
 
-        # Comprobar si ya tiene ticket
+        # Comprobar si ya tiene un ticket
         for channel in category.channels:
 
             if channel.name == f"ticket-{member.id}":
@@ -126,15 +104,16 @@ class TicketView(discord.ui.View):
                 )
         }
 
-        staff_role = guild.get_role(STAFF_ROLE_ID)
+        # Los administradores podrán ver los tickets
+        for role in guild.roles:
 
-        if staff_role:
+            if role.permissions.administrator:
 
-            overwrites[staff_role] = discord.PermissionOverwrite(
-                view_channel=True,
-                send_messages=True,
-                read_message_history=True
-            )
+                overwrites[role] = discord.PermissionOverwrite(
+                    view_channel=True,
+                    send_messages=True,
+                    read_message_history=True
+                )
 
         channel = await guild.create_text_channel(
             f"ticket-{member.id}",
@@ -143,7 +122,8 @@ class TicketView(discord.ui.View):
         )
 
         await channel.send(
-            f"{member.mention} tu ticket ha sido creado.\n\n"
+            f"{member.mention}\n\n"
+            "Tu ticket ha sido creado.\n"
             "Un miembro del staff te atenderá lo antes posible.",
             view=TicketControlView()
         )
@@ -174,9 +154,7 @@ class TicketControlView(discord.ui.View):
         button: discord.ui.Button
     ):
 
-        staff_role = interaction.guild.get_role(STAFF_ROLE_ID)
-
-        if staff_role is None or staff_role not in interaction.user.roles:
+        if not interaction.user.guild_permissions.administrator:
 
             await interaction.response.send_message(
                 "Solo el staff puede reclamar tickets.",
@@ -185,65 +163,10 @@ class TicketControlView(discord.ui.View):
 
             return
 
-        await interaction.channel.send(
-            f"Este ticket ha sido reclamado por {interaction.user.mention}."
+        await interaction.response.send_message(
+            f"Ticket reclamado por {interaction.user.mention}."
         )
-
-        await interaction.response.defer()
 
 
     @discord.ui.button(
-        label="Cerrar",
-        style=discord.ButtonStyle.red,
-        custom_id="infernmc_close_ticket"
-    )
-    async def close_ticket(
-        self,
-        interaction: discord.Interaction,
-        button: discord.ui.Button
-    ):
-
-        staff_role = interaction.guild.get_role(STAFF_ROLE_ID)
-
-        if staff_role is None or staff_role not in interaction.user.roles:
-
-            await interaction.response.send_message(
-                "Solo el staff puede cerrar tickets.",
-                ephemeral=True
-            )
-
-            return
-
-        await interaction.response.send_message(
-            "Cerrando ticket..."
-        )
-
-        await interaction.channel.delete()
-
-
-# =========================
-# COMANDO PANEL
-# =========================
-
-@bot.command()
-@commands.has_permissions(administrator=True)
-async def ticketpanel(ctx):
-
-    await ctx.send(
-        "**Soporte InfernMc**\n\n"
-        "Si necesitas ayuda, abre un ticket utilizando "
-        "el botón de abajo.",
-        view=TicketView()
-    )
-
-
-# =========================
-# INICIAR BOT
-# =========================
-
-TOKEN = os.getenv("DISCORD_TOKEN")
-
-if not TOKEN:
-    raise RuntimeError("Falta DISCORD_TOKEN")
-
-bot.run(TOKEN)
+```
