@@ -52,6 +52,31 @@ async def on_member_join(member):
 
 
 # =========================
+# COMANDO DE PRUEBA
+# =========================
+
+@bot.command()
+@commands.has_permissions(administrator=True)
+async def testbienvenida(ctx):
+
+    channel = bot.get_channel(WELCOME_CHANNEL_ID)
+
+    if channel is None:
+        await ctx.send(
+            "No se encontró el canal de bienvenidas."
+        )
+        return
+
+    await channel.send(
+        f"¡Bienvenido/a al servidor, {ctx.author.mention}! 🎉"
+    )
+
+    await ctx.send(
+        f"Bienvenida de prueba enviada en {channel.mention}."
+    )
+
+
+# =========================
 # MENÚ DE CATEGORÍAS
 # =========================
 
@@ -134,7 +159,7 @@ class TicketSelect(discord.ui.Select):
                 return
 
         # =========================
-        # INFORMACIÓN CATEGORÍAS
+        # INFORMACIÓN DE CATEGORÍAS
         # =========================
 
         categorias = {
@@ -333,6 +358,7 @@ class TicketControlView(discord.ui.View):
 async def ticketpanel(ctx):
 
     # Eliminar paneles anteriores enviados por el bot
+
     async for message in ctx.channel.history(limit=50):
 
         if message.author == bot.user:
