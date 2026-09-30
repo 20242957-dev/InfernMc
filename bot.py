@@ -1,11 +1,12 @@
 import os
 import io
+import asyncio
 import discord
 from discord.ext import commands
 
-# =========================
+# =========================================================
 # INTENTS
-# =========================
+# =========================================================
 
 intents = discord.Intents.default()
 intents.members = True
@@ -16,9 +17,9 @@ bot = commands.Bot(
     intents=intents
 )
 
-# =========================
+# =========================================================
 # CONFIGURACIÓN
-# =========================
+# =========================================================
 
 WELCOME_CHANNEL_ID = 1548521317295198258
 TICKET_CATEGORY_ID = 1548528404649873438
@@ -32,9 +33,72 @@ POSTULACIONES_EMOJI = discord.PartialEmoji(
 )
 
 
-# =========================
+# =========================================================
+# INFORMACIÓN DE CATEGORÍAS
+# =========================================================
+
+CATEGORIAS = {
+
+    "ayuda_general": {
+        "nombre": "🎲 Ayuda General",
+        "descripcion": (
+            "¿Necesitas ayuda en algo en general? "
+            "Esta categoría sirve para los usuarios que "
+            "tengan este tipo de dudas, ya sea en Discord "
+            "o en Minecraft."
+        ),
+        "pregunta": "¿En qué necesitas ayuda?"
+    },
+
+    "bugs": {
+        "nombre": "🎗️ Bugs",
+        "descripcion": (
+            "¿Has encontrado un bug en nuestro servidor "
+            "o ya sea en el Discord del servidor? "
+            "Abre ticket en nuestra categoría específica."
+        ),
+        "pregunta": "¿Qué bug encontraste?"
+    },
+
+    "postulaciones": {
+        "nombre": (
+            "<:573567deadhamster:1549076149399715840> "
+            "Postulaciones"
+        ),
+        "descripcion": (
+            "¿Has sido aceptado en el staff-team de InfernMC? "
+            "Si estás abriendo en esta categoría, enhorabuena, "
+            "felicidades por pasar la primera fase del staff-team."
+        ),
+        "pregunta": "¿Por qué quieres formar parte del Staff-Team?"
+    },
+
+    "tienda": {
+        "nombre": "📯 Tienda",
+        "descripcion": (
+            "Si tienes una duda o problema con la tienda "
+            "del servidor, en esta categoría se resuelve "
+            "todo lo que implica acerca de la tienda."
+        ),
+        "pregunta": "¿Cuál es tu problema con la tienda?"
+    },
+
+    "sanciones": {
+        "nombre": "🗂️ Sanciones",
+        "descripcion": (
+            "Has sido sancionado en el servidor de InfernMC "
+            "o tienes alguna duda sobre tu sanción y quieres "
+            "protestar en contra de esta."
+        ),
+        "pregunta": "¿Por qué motivo quieres apelar tu sanción?"
+    }
+
+}
+
+
+# =========================================================
 # BOT LISTO
-# =========================
+# =========================================================
 
 @bot.event
 async def on_ready():
@@ -45,14 +109,16 @@ async def on_ready():
     bot.add_view(TicketControlView())
 
 
-# =========================
+# =========================================================
 # BIENVENIDAS
-# =========================
+# =========================================================
 
 @bot.event
 async def on_member_join(member):
 
-    channel = bot.get_channel(WELCOME_CHANNEL_ID)
+    channel = bot.get_channel(
+        WELCOME_CHANNEL_ID
+    )
 
     if channel:
 
@@ -61,15 +127,17 @@ async def on_member_join(member):
         )
 
 
-# =========================
+# =========================================================
 # PRUEBA DE BIENVENIDA
-# =========================
+# =========================================================
 
 @bot.command()
 @commands.has_permissions(administrator=True)
 async def testbienvenida(ctx):
 
-    channel = bot.get_channel(WELCOME_CHANNEL_ID)
+    channel = bot.get_channel(
+        WELCOME_CHANNEL_ID
+    )
 
     if channel is None:
 
@@ -89,23 +157,330 @@ async def testbienvenida(ctx):
 
 
 # =========================================================
+# MODAL DE TICKETS
+# =========================================================
+
+class TicketModal(discord.ui.Modal):
+
+    def __init__(self, categoria):
+
+        self.categoria = categoria
+
+        datos = CATEGORIAS[categoria]
+
+        super().__init__(
+            title=f"Abrir ticket • {datos['nombre']}"
+        )
+
+        # -------------------------------------------------
+        # PREGUNTA 1
+        # -------------------------------------------------
+
+        self.nick = discord.ui.TextInput(
+            label="¿Nick?",
+            placeholder="Escribe tu nick de Minecraft...",
+            required=True,
+            min_length=1,
+            max_length=32
+        )
+
+        self.add_item(
+            self.nick
+        )
+
+        # -------------------------------------------------
+        # PREGUNTA 2
+        # -------------------------------------------------
+
+        self.problema = discord.ui.TextInput(
+            label=datos["pregunta"],
+            placeholder="Escribe tu respuesta...",
+            style=discord.TextStyle.paragraph,
+            required=True,
+            min_length=1,
+            max_length=1000
+        )
+
+        self.add_item(
+            self.problema
+        )
+
+
+    async def on_submit(
+        self,
+        interaction: discord.Interaction
+    ):
+
+        guild = interaction.guild
+        member = interaction.user
+
+        category = guild.get_channel(
+            TICKET_CATEGORY_ID
+        )
+
+        if category is None:
+
+            await interaction.response.send_message(
+                "La categoría de tickets no está configurada.",
+                ephemeral=True
+            )
+
+            return
+
+        # =================================================
+        # COMPROBAR TICKET EXISTENTE
+        # =================================================
+
+        for channel in category.channels:
+
+            if channel.name == f"ticket-{member.id}":
+
+                await interaction.response.send_message(
+                    f"Ya tienes un ticket abierto: {channel.mention}",
+                    ephemeral=True
+                )
+
+                return
+
+        # =================================================
+        # RESPUESTAS
+        # =================================================
+
+        nick = self.nick.value
+        respuesta = self.problema.value
+
+        datos = CATEGORIAS[
+            self.categoria
+        ]
+
+        # =================================================
+        # PERMISOS
+        # =================================================
+
+        overwrites = {
+
+            guild.default_role:
+                discord.PermissionOverwrite(
+                    view_channel=False
+                ),
+
+            member:
+                discord.PermissionOverwrite(
+                    view_channel=True,
+                    send_messages=True,
+                    read_message_history=True
+                )
+        }
+
+        # Dar acceso a administradores
+
+        for role in guild.roles:
+
+            if role.permissions.administrator:
+
+                overwrites[role] = discord.PermissionOverwrite(
+                    view_channel=True,
+                    send_messages=True,
+                    read_message_history=True
+                )
+
+        # =================================================
+        # CREAR CANAL
+        # =================================================
+
+        channel = await guild.create_text_channel(
+            f"ticket-{member.id}",
+            category=category,
+            overwrites=overwrites
+        )
+
+        # =================================================
+        # GUARDAR INFORMACIÓN EN TOPIC
+        # =================================================
+
+        await channel.edit(
+            topic=(
+                f"Owner:{member.id}|"
+                f"Staff:Sin reclamar|"
+                f"Categoria:{self.categoria}"
+            )
+        )
+
+        # =================================================
+        # EMBED DEL TICKET
+        # =================================================
+
+        embed = discord.Embed(
+            title=datos["nombre"],
+            description=(
+                f"Bienvenido/a {member.mention}.\n\n"
+                "Tu ticket ha sido creado correctamente.\n\n"
+                "Un miembro del staff te atenderá lo antes posible."
+            ),
+            color=discord.Color.blurple()
+        )
+
+        # Nick
+
+        embed.add_field(
+            name="¿Nick?",
+            value=nick,
+            inline=False
+        )
+
+        # Pregunta específica
+
+        embed.add_field(
+            name=datos["pregunta"],
+            value=respuesta,
+            inline=False
+        )
+
+        # Información
+
+        embed.add_field(
+            name="Categoría",
+            value=datos["nombre"],
+            inline=True
+        )
+
+        embed.add_field(
+            name="Estado",
+            value="Sin reclamar",
+            inline=True
+        )
+
+        embed.set_footer(
+            text="InfernMC • Sistema de tickets"
+        )
+
+        await channel.send(
+            content=member.mention,
+            embed=embed,
+            view=TicketControlView()
+        )
+
+        # =================================================
+        # CONFIRMACIÓN
+        # =================================================
+
+        await interaction.response.send_message(
+            f"Ticket creado correctamente: {channel.mention}",
+            ephemeral=True
+        )
+
+
+# =========================================================
+# MENÚ DE CATEGORÍAS
+# =========================================================
+
+class TicketSelect(discord.ui.Select):
+
+    def __init__(self):
+
+        options = [
+
+            discord.SelectOption(
+                label="Ayuda General",
+                description="Dudas sobre Discord o Minecraft.",
+                emoji="🎲",
+                value="ayuda_general"
+            ),
+
+            discord.SelectOption(
+                label="Bugs",
+                description="Reporta un bug del servidor o Discord.",
+                emoji="🎗️",
+                value="bugs"
+            ),
+
+            discord.SelectOption(
+                label="Postulaciones",
+                description="Postulaciones al Staff-Team.",
+                emoji=POSTULACIONES_EMOJI,
+                value="postulaciones"
+            ),
+
+            discord.SelectOption(
+                label="Tienda",
+                description="Dudas o problemas con la tienda.",
+                emoji="📯",
+                value="tienda"
+            ),
+
+            discord.SelectOption(
+                label="Sanciones",
+                description="Dudas o protestas sobre una sanción.",
+                emoji="🗂️",
+                value="sanciones"
+            )
+
+        ]
+
+        super().__init__(
+            placeholder="Selecciona una categoría...",
+            min_values=1,
+            max_values=1,
+            options=options,
+            custom_id="infernmc_ticket_category"
+        )
+
+
+    async def callback(
+        self,
+        interaction: discord.Interaction
+    ):
+
+        categoria = self.values[0]
+
+        await interaction.response.send_modal(
+            TicketModal(categoria)
+        )
+
+
+# =========================================================
+# PANEL DE TICKETS
+# =========================================================
+
+class TicketPanelView(discord.ui.View):
+
+    def __init__(self):
+
+        super().__init__(
+            timeout=None
+        )
+
+        self.add_item(
+            TicketSelect()
+        )
+
+
+# =========================================================
 # VALORACIONES
 # =========================================================
 
 class RatingView(discord.ui.View):
 
-    def __init__(self, ticket_user_id, ticket_name, staff_name):
+    def __init__(
+        self,
+        ticket_user_id,
+        ticket_name,
+        staff_name
+    ):
 
-        super().__init__(timeout=86400)
+        super().__init__(
+            timeout=86400
+        )
 
         self.ticket_user_id = ticket_user_id
         self.ticket_name = ticket_name
         self.staff_name = staff_name
 
+
     async def send_rating(
         self,
-        interaction: discord.Interaction,
-        stars: int
+        interaction,
+        stars
     ):
 
         if interaction.user.id != self.ticket_user_id:
@@ -179,75 +554,90 @@ class RatingView(discord.ui.View):
     @discord.ui.button(
         label="⭐ 1",
         style=discord.ButtonStyle.red,
-        custom_id="rating_1"
+        custom_id="infernmc_rating_1"
     )
     async def rating_1(
         self,
-        interaction: discord.Interaction,
-        button: discord.ui.Button
+        interaction,
+        button
     ):
 
-        await self.send_rating(interaction, 1)
+        await self.send_rating(
+            interaction,
+            1
+        )
 
 
     @discord.ui.button(
         label="⭐ 2",
         style=discord.ButtonStyle.red,
-        custom_id="rating_2"
+        custom_id="infernmc_rating_2"
     )
     async def rating_2(
         self,
-        interaction: discord.Interaction,
-        button: discord.ui.Button
+        interaction,
+        button
     ):
 
-        await self.send_rating(interaction, 2)
+        await self.send_rating(
+            interaction,
+            2
+        )
 
 
     @discord.ui.button(
         label="⭐ 3",
         style=discord.ButtonStyle.blurple,
-        custom_id="rating_3"
+        custom_id="infernmc_rating_3"
     )
     async def rating_3(
         self,
-        interaction: discord.Interaction,
-        button: discord.ui.Button
+        interaction,
+        button
     ):
 
-        await self.send_rating(interaction, 3)
+        await self.send_rating(
+            interaction,
+            3
+        )
 
 
     @discord.ui.button(
         label="⭐ 4",
         style=discord.ButtonStyle.green,
-        custom_id="rating_4"
+        custom_id="infernmc_rating_4"
     )
     async def rating_4(
         self,
-        interaction: discord.Interaction,
-        button: discord.ui.Button
+        interaction,
+        button
     ):
 
-        await self.send_rating(interaction, 4)
+        await self.send_rating(
+            interaction,
+            4
+        )
 
 
     @discord.ui.button(
         label="⭐ 5",
         style=discord.ButtonStyle.green,
-        custom_id="rating_5"
+        custom_id="infernmc_rating_5"
     )
     async def rating_5(
         self,
-        interaction: discord.Interaction,
-        button: discord.ui.Button
+        interaction,
+        button
     ):
 
-        await self.send_rating(interaction, 5)
+        await self.send_rating(
+            interaction,
+            5
+        )
 
 
 # =========================================================
-# TRANSCRIPT
+# CREAR TRANSCRIPT
 # =========================================================
 
 async def crear_transcript(channel):
@@ -266,10 +656,13 @@ async def crear_transcript(channel):
         contenido = message.content
 
         if not contenido:
+
             contenido = "[Sin contenido de texto]"
 
         mensajes.append(
-            f"[{fecha}] {message.author} ({message.author.id}):\n"
+            f"[{fecha}] "
+            f"{message.author} "
+            f"({message.author.id}):\n"
             f"{contenido}\n"
         )
 
@@ -288,252 +681,12 @@ async def crear_transcript(channel):
     texto = (
         f"TRANSCRIPT - {channel.name}\n"
         f"ID DEL CANAL: {channel.id}\n"
-        f"FECHA DE GENERACIÓN: "
-        f"{discord.utils.utcnow().strftime('%d/%m/%Y %H:%M:%S')}\n"
-        f"\n"
+        f"FECHA: "
+        f"{discord.utils.utcnow().strftime('%d/%m/%Y %H:%M:%S')}\n\n"
         + "\n".join(mensajes)
     )
 
     return texto
-
-
-# =========================================================
-# MENÚ DE TICKETS
-# =========================================================
-
-class TicketSelect(discord.ui.Select):
-
-    def __init__(self):
-
-        options = [
-
-            discord.SelectOption(
-                label="Ayuda General",
-                description="Dudas sobre Discord o Minecraft.",
-                emoji="🎲",
-                value="ayuda_general"
-            ),
-
-            discord.SelectOption(
-                label="Bugs",
-                description="Reporta un bug del servidor o Discord.",
-                emoji="🎗️",
-                value="bugs"
-            ),
-
-            discord.SelectOption(
-                label="Postulaciones",
-                description="Postulaciones al Staff-Team de InfernMC.",
-                emoji=POSTULACIONES_EMOJI,
-                value="postulaciones"
-            ),
-
-            discord.SelectOption(
-                label="Tienda",
-                description="Dudas o problemas con la tienda.",
-                emoji="📯",
-                value="tienda"
-            ),
-
-            discord.SelectOption(
-                label="Sanciones",
-                description="Dudas o protestas sobre una sanción.",
-                emoji="🗂️",
-                value="sanciones"
-            )
-
-        ]
-
-        super().__init__(
-            placeholder="Selecciona una categoría...",
-            min_values=1,
-            max_values=1,
-            options=options,
-            custom_id="infernmc_ticket_category"
-        )
-
-
-    async def callback(self, interaction: discord.Interaction):
-
-        guild = interaction.guild
-        member = interaction.user
-
-        category = guild.get_channel(
-            TICKET_CATEGORY_ID
-        )
-
-        if category is None:
-
-            await interaction.response.send_message(
-                "La categoría de tickets no está configurada.",
-                ephemeral=True
-            )
-
-            return
-
-        # =========================
-        # TICKET EXISTENTE
-        # =========================
-
-        for channel in category.channels:
-
-            if channel.name == f"ticket-{member.id}":
-
-                await interaction.response.send_message(
-                    f"Ya tienes un ticket abierto: {channel.mention}",
-                    ephemeral=True
-                )
-
-                return
-
-        # =========================
-        # CATEGORÍAS
-        # =========================
-
-        categorias = {
-
-            "ayuda_general": {
-                "nombre": "🎲 Ayuda General",
-                "descripcion": (
-                    "¿Necesitas ayuda en algo en general? "
-                    "Esta categoría sirve para los usuarios "
-                    "que tengan este tipo de dudas, ya sea en "
-                    "Discord o en Minecraft."
-                )
-            },
-
-            "bugs": {
-                "nombre": "🎗️ Bugs",
-                "descripcion": (
-                    "¿Has encontrado un bug en nuestro servidor "
-                    "o ya sea en el Discord del servidor? "
-                    "Abre ticket en nuestra categoría específica."
-                )
-            },
-
-            "postulaciones": {
-                "nombre": (
-                    "<:573567deadhamster:1549076149399715840> "
-                    "Postulaciones"
-                ),
-                "descripcion": (
-                    "¿Has sido aceptado en el staff-team de InfernMC? "
-                    "Si estás abriendo en esta categoría, enhorabuena, "
-                    "felicidades por pasar la primera fase del staff-team."
-                )
-            },
-
-            "tienda": {
-                "nombre": "📯 Tienda",
-                "descripcion": (
-                    "Si tienes una duda o problema con la tienda "
-                    "del servidor, en esta categoría se resuelve "
-                    "todo lo que implica acerca de la tienda."
-                )
-            },
-
-            "sanciones": {
-                "nombre": "🗂️ Sanciones",
-                "descripcion": (
-                    "Has sido sancionado en el servidor de InfernMC "
-                    "o tienes alguna duda sobre tu sanción y quieres "
-                    "protestar en contra de esta."
-                )
-            }
-
-        }
-
-        datos = categorias[self.values[0]]
-
-        # =========================
-        # PERMISOS
-        # =========================
-
-        overwrites = {
-
-            guild.default_role:
-                discord.PermissionOverwrite(
-                    view_channel=False
-                ),
-
-            member:
-                discord.PermissionOverwrite(
-                    view_channel=True,
-                    send_messages=True,
-                    read_message_history=True
-                )
-        }
-
-        # Administradores
-
-        for role in guild.roles:
-
-            if role.permissions.administrator:
-
-                overwrites[role] = discord.PermissionOverwrite(
-                    view_channel=True,
-                    send_messages=True,
-                    read_message_history=True
-                )
-
-        # =========================
-        # CREAR CANAL
-        # =========================
-
-        channel = await guild.create_text_channel(
-            f"ticket-{member.id}",
-            category=category,
-            overwrites=overwrites
-        )
-
-        # Guardar información del ticket
-
-        await channel.edit(
-            topic=f"Owner:{member.id}|Staff:Sin reclamar"
-        )
-
-        # =========================
-        # EMBED DEL TICKET
-        # =========================
-
-        embed = discord.Embed(
-            title=datos["nombre"],
-            description=(
-                f"{datos['descripcion']}\n\n"
-                "Un miembro del staff te atenderá lo antes posible.\n\n"
-                "# Recuerda\n"
-                "• No abras demasiados tickets simultáneamente.\n"
-                "• No insultes al staff.\n"
-                "• Sé claro y directo a la hora de hacer un ticket."
-            ),
-            color=discord.Color.blurple()
-        )
-
-        await channel.send(
-            content=member.mention,
-            embed=embed,
-            view=TicketControlView()
-        )
-
-        await interaction.response.send_message(
-            f"Ticket creado: {channel.mention}",
-            ephemeral=True
-        )
-
-
-# =========================================================
-# PANEL
-# =========================================================
-
-class TicketPanelView(discord.ui.View):
-
-    def __init__(self):
-
-        super().__init__(timeout=None)
-
-        self.add_item(
-            TicketSelect()
-        )
 
 
 # =========================================================
@@ -544,12 +697,14 @@ class TicketControlView(discord.ui.View):
 
     def __init__(self):
 
-        super().__init__(timeout=None)
+        super().__init__(
+            timeout=None
+        )
 
 
-    # =========================
+    # =====================================================
     # RECLAMAR
-    # =========================
+    # =====================================================
 
     @discord.ui.button(
         label="Reclamar",
@@ -558,8 +713,8 @@ class TicketControlView(discord.ui.View):
     )
     async def claim_ticket(
         self,
-        interaction: discord.Interaction,
-        button: discord.ui.Button
+        interaction,
+        button
     ):
 
         if not interaction.user.guild_permissions.administrator:
@@ -575,7 +730,10 @@ class TicketControlView(discord.ui.View):
 
         topic = channel.topic or ""
 
-        if "Staff:" in topic and "Staff:Sin reclamar" not in topic:
+        if (
+            "Staff:" in topic
+            and "Staff:Sin reclamar" not in topic
+        ):
 
             await interaction.response.send_message(
                 "Este ticket ya fue reclamado.",
@@ -590,11 +748,11 @@ class TicketControlView(discord.ui.View):
 
             try:
 
-                owner_id = topic.split(
-                    "Owner:"
-                )[1].split(
-                    "|"
-                )[0]
+                owner_id = (
+                    topic
+                    .split("Owner:")[1]
+                    .split("|")[0]
+                )
 
             except:
 
@@ -603,7 +761,9 @@ class TicketControlView(discord.ui.View):
         await channel.edit(
             topic=(
                 f"Owner:{owner_id}|"
-                f"Staff:{interaction.user.id}"
+                f"Staff:{interaction.user.id}|"
+                f"Categoria:"
+                f"{topic.split('Categoria:')[-1]}"
             )
         )
 
@@ -612,9 +772,9 @@ class TicketControlView(discord.ui.View):
         )
 
 
-    # =========================
+    # =====================================================
     # CERRAR
-    # =========================
+    # =====================================================
 
     @discord.ui.button(
         label="Cerrar",
@@ -623,8 +783,8 @@ class TicketControlView(discord.ui.View):
     )
     async def close_ticket(
         self,
-        interaction: discord.Interaction,
-        button: discord.ui.Button
+        interaction,
+        button
     ):
 
         if not interaction.user.guild_permissions.administrator:
@@ -638,54 +798,64 @@ class TicketControlView(discord.ui.View):
 
         channel = interaction.channel
 
-        # =========================
-        # OBTENER INFORMACIÓN
-        # =========================
-
         topic = channel.topic or ""
 
         owner_id = None
         staff_id = None
+
+        # =================================================
+        # OWNER
+        # =================================================
 
         if "Owner:" in topic:
 
             try:
 
                 owner_id = int(
-                    topic.split(
-                        "Owner:"
-                    )[1].split(
-                        "|"
-                    )[0]
+                    topic
+                    .split("Owner:")[1]
+                    .split("|")[0]
                 )
 
             except:
 
                 pass
 
+        # =================================================
+        # STAFF
+        # =================================================
+
         if "Staff:" in topic:
 
             try:
 
-                staff_text = topic.split(
-                    "Staff:"
-                )[1]
+                staff_text = (
+                    topic
+                    .split("Staff:")[1]
+                    .split("|")[0]
+                )
 
                 if staff_text != "Sin reclamar":
 
-                    staff_id = int(staff_text)
+                    staff_id = int(
+                        staff_text
+                    )
 
             except:
 
                 pass
 
-        # =========================
-        # CREAR TRANSCRIPT
-        # =========================
+        # =================================================
+        # AVISO
+        # =================================================
 
         await interaction.response.send_message(
             "Generando transcript y cerrando ticket..."
         )
+
+        # =================================================
+        # TRANSCRIPT
+        # =================================================
 
         transcript = await crear_transcript(
             channel
@@ -750,9 +920,9 @@ class TicketControlView(discord.ui.View):
                 file=archivo
             )
 
-        # =========================
+        # =================================================
         # VALORACIÓN
-        # =========================
+        # =================================================
 
         if owner_id:
 
@@ -791,33 +961,30 @@ class TicketControlView(discord.ui.View):
                     text="InfernMC • Valoraciones"
                 )
 
-                try:
-
-                    await user.send(
-                        embed=rating_embed,
-                        view=RatingView(
-                            owner_id,
-                            channel.name,
-                            staff_name
-                        )
+                await user.send(
+                    embed=rating_embed,
+                    view=RatingView(
+                        owner_id,
+                        channel.name,
+                        staff_name
                     )
+                )
 
-                except discord.Forbidden:
-
-                    pass
-
-            except:
+            except discord.Forbidden:
 
                 pass
 
-        # =========================
-        # ESPERAR Y ELIMINAR
-        # =========================
+            except Exception as error:
 
-        await discord.utils.sleep_until(
-            discord.utils.utcnow()
-            + discord.timedelta(seconds=3)
-        )
+                print(
+                    f"Error enviando valoración: {error}"
+                )
+
+        # =================================================
+        # ESPERAR Y BORRAR
+        # =================================================
+
+        await asyncio.sleep(3)
 
         await channel.delete()
 
@@ -830,9 +997,9 @@ class TicketControlView(discord.ui.View):
 @commands.has_permissions(administrator=True)
 async def ticketpanel(ctx):
 
-    # =========================
+    # =====================================================
     # BORRAR PANELES ANTERIORES
-    # =========================
+    # =====================================================
 
     async for message in ctx.channel.history(
         limit=50
@@ -848,9 +1015,9 @@ async def ticketpanel(ctx):
 
                 pass
 
-    # =========================
-    # EMBED
-    # =========================
+    # =====================================================
+    # PANEL
+    # =====================================================
 
     embed = discord.Embed(
         title="¿Necesitas ayuda?",
