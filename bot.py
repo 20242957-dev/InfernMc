@@ -2,6 +2,10 @@ import os
 import discord
 from discord.ext import commands
 
+# =========================
+# INTENTS
+# =========================
+
 intents = discord.Intents.default()
 intents.members = True
 intents.message_content = True
@@ -52,7 +56,7 @@ async def on_member_join(member):
 
 
 # =========================
-# COMANDO DE PRUEBA
+# PRUEBA DE BIENVENIDA
 # =========================
 
 @bot.command()
@@ -77,7 +81,7 @@ async def testbienvenida(ctx):
 
 
 # =========================
-# MENÚ DE CATEGORÍAS
+# MENÚ DE TICKETS
 # =========================
 
 class TicketSelect(discord.ui.Select):
@@ -145,7 +149,9 @@ class TicketSelect(discord.ui.Select):
             )
             return
 
-        # Comprobar si ya tiene un ticket
+        # =========================
+        # COMPROBAR TICKET EXISTENTE
+        # =========================
 
         for channel in category.channels:
 
@@ -166,44 +172,51 @@ class TicketSelect(discord.ui.Select):
 
             "ayuda_general": {
                 "nombre": "🎲 Ayuda General",
-                "descripcion":
+                "descripcion": (
                     "¿Necesitas ayuda en algo en general? "
                     "Esta categoría sirve para los usuarios "
                     "que tengan este tipo de dudas, ya sea en "
                     "Discord o en Minecraft."
+                )
             },
 
             "bugs": {
                 "nombre": "🎗️ Bugs",
-                "descripcion":
+                "descripcion": (
                     "¿Has encontrado un bug en nuestro servidor "
                     "o ya sea en el Discord del servidor? "
                     "Abre ticket en nuestra categoría específica."
+                )
             },
 
             "postulaciones": {
-                "nombre":
-                    "<:573567deadhamster:1549076149399715840> Postulaciones",
-                "descripcion":
+                "nombre": (
+                    "<:573567deadhamster:1549076149399715840> "
+                    "Postulaciones"
+                ),
+                "descripcion": (
                     "¿Has sido aceptado en el staff-team de InfernMC? "
                     "Si estás abriendo en esta categoría, enhorabuena, "
                     "felicidades por pasar la primera fase del staff-team."
+                )
             },
 
             "tienda": {
                 "nombre": "📯 Tienda",
-                "descripcion":
+                "descripcion": (
                     "Si tienes una duda o problema con la tienda "
                     "del servidor, en esta categoría se resuelve "
                     "todo lo que implica acerca de la tienda."
+                )
             },
 
             "sanciones": {
                 "nombre": "🗂️ Sanciones",
-                "descripcion":
+                "descripcion": (
                     "Has sido sancionado en el servidor de InfernMC "
                     "o tienes alguna duda sobre tu sanción y quieres "
                     "protestar en contra de esta."
+                )
             }
 
         }
@@ -211,7 +224,7 @@ class TicketSelect(discord.ui.Select):
         datos = categorias[self.values[0]]
 
         # =========================
-        # PERMISOS
+        # PERMISOS DEL TICKET
         # =========================
 
         overwrites = {
@@ -229,7 +242,7 @@ class TicketSelect(discord.ui.Select):
                 )
         }
 
-        # Administradores
+        # Dar acceso a administradores
 
         for role in guild.roles:
 
@@ -242,7 +255,7 @@ class TicketSelect(discord.ui.Select):
                 )
 
         # =========================
-        # CREAR TICKET
+        # CREAR CANAL
         # =========================
 
         channel = await guild.create_text_channel(
@@ -251,21 +264,26 @@ class TicketSelect(discord.ui.Select):
             overwrites=overwrites
         )
 
+        # =========================
+        # MENSAJE DEL TICKET
+        # =========================
+
+        embed = discord.Embed(
+            title=datos["nombre"],
+            description=(
+                f"{datos['descripcion']}\n\n"
+                "Un miembro del staff te atenderá lo antes posible.\n\n"
+                "**Recuerda:**\n"
+                "• No abras demasiados tickets simultáneamente.\n"
+                "• No insultes al staff.\n"
+                "• Sé claro y directo a la hora de hacer un ticket."
+            ),
+            color=discord.Color.blurple()
+        )
+
         await channel.send(
-
-            f"{member.mention}\n\n"
-
-            f"**{datos['nombre']}**\n\n"
-
-            f"{datos['descripcion']}\n\n"
-
-            "Un miembro del staff te atenderá lo antes posible.\n\n"
-
-            "**Recuerda:**\n"
-            "• No abras demasiados tickets simultáneamente.\n"
-            "• No insultes al staff.\n"
-            "• Sé claro y directo a la hora de hacer un ticket.",
-
+            content=member.mention,
+            embed=embed,
             view=TicketControlView()
         )
 
@@ -289,7 +307,7 @@ class TicketPanelView(discord.ui.View):
 
 
 # =========================
-# CONTROL DEL TICKET
+# CONTROL DE TICKETS
 # =========================
 
 class TicketControlView(discord.ui.View):
@@ -297,6 +315,10 @@ class TicketControlView(discord.ui.View):
     def __init__(self):
 
         super().__init__(timeout=None)
+
+    # =========================
+    # RECLAMAR
+    # =========================
 
     @discord.ui.button(
         label="Reclamar",
@@ -321,6 +343,10 @@ class TicketControlView(discord.ui.View):
         await interaction.response.send_message(
             f"Ticket reclamado por {interaction.user.mention}."
         )
+
+    # =========================
+    # CERRAR
+    # =========================
 
     @discord.ui.button(
         label="Cerrar",
@@ -357,7 +383,9 @@ class TicketControlView(discord.ui.View):
 @commands.has_permissions(administrator=True)
 async def ticketpanel(ctx):
 
-    # Eliminar paneles anteriores enviados por el bot
+    # =========================
+    # BORRAR PANELES ANTERIORES
+    # =========================
 
     async for message in ctx.channel.history(limit=50):
 
@@ -368,49 +396,113 @@ async def ticketpanel(ctx):
             except:
                 pass
 
+    # =========================
+    # CREAR EMBED
+    # =========================
+
+    embed = discord.Embed(
+        title="¿Necesitas ayuda?",
+        description=(
+            "No dudes en abrir ticket para una atención mediante "
+            "el staff del servidor.\n\n"
+
+            "**Ten en cuenta que:**\n"
+            "• No abras demasiados tickets simultáneamente.\n"
+            "• No insultes al staff, podrías ser sancionado si lo haces.\n"
+            "• Recuerda ser claro y directo a la hora de hacer un ticket.\n\n"
+
+            "Los tickets se dividen en diferentes categorías, "
+            "las cuales incluyen el 50% de las situaciones que "
+            "pueden pasar en el servidor."
+        ),
+        color=discord.Color.blurple()
+    )
+
+    # =========================
+    # AYUDA GENERAL
+    # =========================
+
+    embed.add_field(
+        name="🎲 Ayuda General",
+        value=(
+            "¿Necesitas ayuda en algo en general? "
+            "Esta categoría sirve para los usuarios que "
+            "tengan este tipo de dudas, ya sea en Discord "
+            "o en Minecraft."
+        ),
+        inline=False
+    )
+
+    # =========================
+    # BUGS
+    # =========================
+
+    embed.add_field(
+        name="🎗️ Bugs",
+        value=(
+            "¿Has encontrado un bug en nuestro servidor "
+            "o ya sea en el Discord del servidor? "
+            "Abre ticket en nuestra categoría específica."
+        ),
+        inline=False
+    )
+
+    # =========================
+    # POSTULACIONES
+    # =========================
+
+    embed.add_field(
+        name="<:573567deadhamster:1549076149399715840> Postulaciones",
+        value=(
+            "¿Has sido aceptado en el staff-team de InfernMC? "
+            "Si estás abriendo en esta categoría, enhorabuena, "
+            "felicidades por pasar la primera fase del staff-team."
+        ),
+        inline=False
+    )
+
+    # =========================
+    # TIENDA
+    # =========================
+
+    embed.add_field(
+        name="📯 Tienda",
+        value=(
+            "Si tienes una duda o problema con la tienda "
+            "del servidor, en esta categoría se resuelve "
+            "todo lo que implica acerca de la tienda."
+        ),
+        inline=False
+    )
+
+    # =========================
+    # SANCIONES
+    # =========================
+
+    embed.add_field(
+        name="🗂️ Sanciones",
+        value=(
+            "Has sido sancionado en el servidor de InfernMC "
+            "o tienes alguna duda sobre tu sanción y quieres "
+            "protestar en contra de esta."
+        ),
+        inline=False
+    )
+
+    # =========================
+    # FOOTER
+    # =========================
+
+    embed.set_footer(
+        text="Selecciona una categoría en el menú desplegable."
+    )
+
+    # =========================
+    # ENVIAR PANEL
+    # =========================
+
     await ctx.send(
-
-        "**¿Necesitas ayuda?**\n\n"
-
-        "No dudes en abrir ticket para una atención mediante "
-        "el staff del servidor.\n\n"
-
-        "**Ten en cuenta que:**\n"
-        "• No abras demasiados tickets simultáneamente.\n"
-        "• No insultes al staff, podrías ser sancionado si lo haces.\n"
-        "• Recuerda ser claro y directo a la hora de hacer un ticket.\n\n"
-
-        "Los tickets se dividen en diferentes categorías, "
-        "las cuales incluyen el 50% de las situaciones que "
-        "pueden pasar en el servidor.\n\n"
-
-        "🎲 **Ayuda General**\n"
-        "¿Necesitas ayuda en algo en general? Esta categoría "
-        "sirve para los usuarios que tengan este tipo de dudas, "
-        "ya sea en Discord o en Minecraft.\n\n"
-
-        "🎗️ **Bugs**\n"
-        "¿Has encontrado un bug en nuestro servidor o ya sea "
-        "en el Discord del servidor? Abre ticket en nuestra "
-        "categoría específica.\n\n"
-
-        "<:573567deadhamster:1549076149399715840> **Postulaciones**\n"
-        "¿Has sido aceptado en el staff-team de InfernMC? "
-        "Si estás abriendo en esta categoría, enhorabuena, "
-        "felicidades por pasar la primera fase del staff-team.\n\n"
-
-        "📯 **Tienda**\n"
-        "Si tienes una duda o problema con la tienda del servidor, "
-        "en esta categoría se resuelve todo lo que implica acerca "
-        "de la tienda.\n\n"
-
-        "🗂️ **Sanciones**\n"
-        "Has sido sancionado en el servidor de InfernMC o tienes "
-        "alguna duda sobre tu sanción y quieres protestar en contra "
-        "de esta.\n\n"
-
-        "**Selecciona una categoría en el menú desplegable:**",
-
+        embed=embed,
         view=TicketPanelView()
     )
 
