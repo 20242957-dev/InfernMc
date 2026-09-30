@@ -58,7 +58,7 @@ class TicketSelect(discord.ui.Select):
 
             discord.SelectOption(
                 label="Ayuda General",
-                description="Dudas generales sobre Discord o Minecraft.",
+                description="Dudas sobre Discord o Minecraft.",
                 emoji="🎲",
                 value="ayuda_general"
             ),
@@ -72,21 +72,24 @@ class TicketSelect(discord.ui.Select):
 
             discord.SelectOption(
                 label="Postulaciones",
-                description="Postulaciones para el Staff-Team de InfernMC.",
-                emoji="📋",
+                description="Postulaciones al Staff-Team de InfernMC.",
+                emoji=discord.PartialEmoji(
+                    name="573567deadhamster",
+                    id=1549076149399715840
+                ),
                 value="postulaciones"
             ),
 
             discord.SelectOption(
                 label="Tienda",
-                description="Dudas o problemas con la tienda del servidor.",
+                description="Dudas o problemas con la tienda.",
                 emoji="📯",
                 value="tienda"
             ),
 
             discord.SelectOption(
                 label="Sanciones",
-                description="Dudas o protestas relacionadas con sanciones.",
+                description="Dudas o protestas sobre una sanción.",
                 emoji="🗂️",
                 value="sanciones"
             )
@@ -95,6 +98,8 @@ class TicketSelect(discord.ui.Select):
 
         super().__init__(
             placeholder="Selecciona una categoría...",
+            min_values=1,
+            max_values=1,
             options=options,
             custom_id="infernmc_ticket_category"
         )
@@ -128,58 +133,56 @@ class TicketSelect(discord.ui.Select):
 
                 return
 
-        # Datos de la categoría
-
         categorias = {
 
             "ayuda_general": {
-                "nombre": "Ayuda General",
-                "emoji": "🎲",
+                "nombre": "🎲 Ayuda General",
                 "descripcion":
                     "¿Necesitas ayuda en algo en general? "
-                    "Esta categoría sirve para dudas relacionadas "
-                    "con Discord o Minecraft."
+                    "Esta categoría sirve para los usuarios que "
+                    "tengan este tipo de dudas, ya sea en Discord "
+                    "o en Minecraft."
             },
 
             "bugs": {
-                "nombre": "Bugs",
-                "emoji": "🎗️",
+                "nombre": "🎗️ Bugs",
                 "descripcion":
                     "¿Has encontrado un bug en nuestro servidor "
-                    "o en el Discord? Abre ticket en esta categoría."
+                    "o ya sea en el Discord del servidor? "
+                    "Abre ticket en nuestra categoría específica."
             },
 
             "postulaciones": {
-                "nombre": "Postulaciones",
-                "emoji": "📋",
+                "nombre": "<:573567deadhamster:1549076149399715840> Postulaciones",
                 "descripcion":
                     "¿Has sido aceptado en el Staff-Team de InfernMC? "
-                    "Enhorabuena por pasar la primera fase."
+                    "Si estás abriendo en esta categoría, enhorabuena, "
+                    "felicidades por pasar la primera fase del Staff-Team."
             },
 
             "tienda": {
-                "nombre": "Tienda",
-                "emoji": "📯",
+                "nombre": "📯 Tienda",
                 "descripcion":
                     "Si tienes una duda o problema con la tienda "
-                    "del servidor, aquí se resolverá todo lo relacionado "
-                    "con ella."
+                    "del servidor, en esta categoría se resuelve "
+                    "todo lo que implica acerca de la tienda."
             },
 
             "sanciones": {
-                "nombre": "Sanciones",
-                "emoji": "🗂️",
+                "nombre": "🗂️ Sanciones",
                 "descripcion":
                     "¿Has sido sancionado en el servidor de InfernMC "
                     "o tienes alguna duda sobre tu sanción y quieres "
-                    "protestar contra ella?"
+                    "protestar en contra de esta?"
             }
 
         }
 
         datos = categorias[self.values[0]]
 
-        # Permisos
+        # =========================
+        # PERMISOS
+        # =========================
 
         overwrites = {
 
@@ -208,7 +211,9 @@ class TicketSelect(discord.ui.Select):
                     read_message_history=True
                 )
 
-        # Crear canal
+        # =========================
+        # CREAR TICKET
+        # =========================
 
         channel = await guild.create_text_channel(
             f"ticket-{member.id}",
@@ -216,22 +221,20 @@ class TicketSelect(discord.ui.Select):
             overwrites=overwrites
         )
 
-        # Mensaje del ticket
-
         await channel.send(
 
             f"{member.mention}\n\n"
 
-            f"{datos['emoji']} **{datos['nombre']}**\n\n"
+            f"**{datos['nombre']}**\n\n"
 
             f"{datos['descripcion']}\n\n"
 
             "Un miembro del staff te atenderá lo antes posible.\n\n"
 
             "**Recuerda:**\n"
-            "• Sé claro y directo.\n"
+            "• No abras demasiados tickets simultáneamente.\n"
             "• No insultes al staff.\n"
-            "• No abras demasiados tickets simultáneamente.",
+            "• Sé claro y directo a la hora de hacer un ticket.",
 
             view=TicketControlView()
         )
@@ -243,7 +246,7 @@ class TicketSelect(discord.ui.Select):
 
 
 # =========================
-# PANEL DE TICKETS
+# PANEL
 # =========================
 
 class TicketPanelView(discord.ui.View):
@@ -324,21 +327,31 @@ class TicketControlView(discord.ui.View):
 @commands.has_permissions(administrator=True)
 async def ticketpanel(ctx):
 
+    # Eliminar paneles anteriores enviados por el bot
+    async for message in ctx.channel.history(limit=50):
+
+        if message.author == bot.user:
+
+            try:
+                await message.delete()
+            except:
+                pass
+
     await ctx.send(
 
-        "# ¿Necesitas ayuda?\n\n"
+        "**¿Necesitas ayuda?**\n\n"
 
         "No dudes en abrir ticket para una atención mediante "
         "el staff del servidor.\n\n"
 
-        "**Ten en cuenta:**\n"
+        "**Ten en cuenta que:**\n"
         "• No abras demasiados tickets simultáneamente.\n"
-        "• No insultes al staff, podrías ser sancionado.\n"
+        "• No insultes al staff, podrías ser sancionado si lo haces.\n"
         "• Recuerda ser claro y directo a la hora de hacer un ticket.\n\n"
 
         "Los tickets se dividen en diferentes categorías, "
-        "las cuales incluyen diferentes situaciones que pueden "
-        "pasar en el servidor.\n\n"
+        "las cuales incluyen el 50% de las situaciones que "
+        "pueden pasar en el servidor.\n\n"
 
         "Selecciona una categoría en el menú desplegable:",
 
