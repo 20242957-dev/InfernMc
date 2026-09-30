@@ -18,6 +18,11 @@ bot = commands.Bot(
 WELCOME_CHANNEL_ID = 1548521317295198258
 TICKET_CATEGORY_ID = 1548528404649873438
 
+POSTULACIONES_EMOJI = discord.PartialEmoji(
+    name="573567deadhamster",
+    id=1549076149399715840
+)
+
 
 # =========================
 # BOT LISTO
@@ -73,10 +78,7 @@ class TicketSelect(discord.ui.Select):
             discord.SelectOption(
                 label="Postulaciones",
                 description="Postulaciones al Staff-Team de InfernMC.",
-                emoji=discord.PartialEmoji(
-                    name="573567deadhamster",
-                    id=1549076149399715840
-                ),
+                emoji=POSTULACIONES_EMOJI,
                 value="postulaciones"
             ),
 
@@ -112,12 +114,10 @@ class TicketSelect(discord.ui.Select):
         category = guild.get_channel(TICKET_CATEGORY_ID)
 
         if category is None:
-
             await interaction.response.send_message(
                 "La categoría de tickets no está configurada.",
                 ephemeral=True
             )
-
             return
 
         # Comprobar si ya tiene un ticket
@@ -133,15 +133,19 @@ class TicketSelect(discord.ui.Select):
 
                 return
 
+        # =========================
+        # INFORMACIÓN CATEGORÍAS
+        # =========================
+
         categorias = {
 
             "ayuda_general": {
                 "nombre": "🎲 Ayuda General",
                 "descripcion":
                     "¿Necesitas ayuda en algo en general? "
-                    "Esta categoría sirve para los usuarios que "
-                    "tengan este tipo de dudas, ya sea en Discord "
-                    "o en Minecraft."
+                    "Esta categoría sirve para los usuarios "
+                    "que tengan este tipo de dudas, ya sea en "
+                    "Discord o en Minecraft."
             },
 
             "bugs": {
@@ -153,11 +157,12 @@ class TicketSelect(discord.ui.Select):
             },
 
             "postulaciones": {
-                "nombre": "<:573567deadhamster:1549076149399715840> Postulaciones",
+                "nombre":
+                    "<:573567deadhamster:1549076149399715840> Postulaciones",
                 "descripcion":
-                    "¿Has sido aceptado en el Staff-Team de InfernMC? "
+                    "¿Has sido aceptado en el staff-team de InfernMC? "
                     "Si estás abriendo en esta categoría, enhorabuena, "
-                    "felicidades por pasar la primera fase del Staff-Team."
+                    "felicidades por pasar la primera fase del staff-team."
             },
 
             "tienda": {
@@ -171,9 +176,9 @@ class TicketSelect(discord.ui.Select):
             "sanciones": {
                 "nombre": "🗂️ Sanciones",
                 "descripcion":
-                    "¿Has sido sancionado en el servidor de InfernMC "
+                    "Has sido sancionado en el servidor de InfernMC "
                     "o tienes alguna duda sobre tu sanción y quieres "
-                    "protestar en contra de esta?"
+                    "protestar en contra de esta."
             }
 
         }
@@ -246,7 +251,7 @@ class TicketSelect(discord.ui.Select):
 
 
 # =========================
-# PANEL
+# PANEL DE TICKETS
 # =========================
 
 class TicketPanelView(discord.ui.View):
@@ -353,7 +358,32 @@ async def ticketpanel(ctx):
         "las cuales incluyen el 50% de las situaciones que "
         "pueden pasar en el servidor.\n\n"
 
-        "Selecciona una categoría en el menú desplegable:",
+        "🎲 **Ayuda General**\n"
+        "¿Necesitas ayuda en algo en general? Esta categoría "
+        "sirve para los usuarios que tengan este tipo de dudas, "
+        "ya sea en Discord o en Minecraft.\n\n"
+
+        "🎗️ **Bugs**\n"
+        "¿Has encontrado un bug en nuestro servidor o ya sea "
+        "en el Discord del servidor? Abre ticket en nuestra "
+        "categoría específica.\n\n"
+
+        "<:573567deadhamster:1549076149399715840> **Postulaciones**\n"
+        "¿Has sido aceptado en el staff-team de InfernMC? "
+        "Si estás abriendo en esta categoría, enhorabuena, "
+        "felicidades por pasar la primera fase del staff-team.\n\n"
+
+        "📯 **Tienda**\n"
+        "Si tienes una duda o problema con la tienda del servidor, "
+        "en esta categoría se resuelve todo lo que implica acerca "
+        "de la tienda.\n\n"
+
+        "🗂️ **Sanciones**\n"
+        "Has sido sancionado en el servidor de InfernMC o tienes "
+        "alguna duda sobre tu sanción y quieres protestar en contra "
+        "de esta.\n\n"
+
+        "**Selecciona una categoría en el menú desplegable:**",
 
         view=TicketPanelView()
     )
