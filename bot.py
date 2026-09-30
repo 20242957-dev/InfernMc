@@ -27,9 +27,7 @@ TICKET_CATEGORY_ID = 1548528404649873438
 async def on_ready():
     print(f"InfernMc conectado como {bot.user}")
 
-    # Registrar las vistas para que los botones sigan funcionando
-    # después de reiniciar el bot.
-    bot.add_view(TicketView())
+    bot.add_view(TicketPanelView())
     bot.add_view(TicketControlView())
 
 
@@ -62,7 +60,7 @@ class TicketSelect(discord.ui.Select):
                 label="Ayuda General",
                 description="Dudas generales sobre Discord o Minecraft.",
                 emoji="🎲",
-                value="ayuda"
+                value="ayuda_general"
             ),
 
             discord.SelectOption(
@@ -74,16 +72,23 @@ class TicketSelect(discord.ui.Select):
 
             discord.SelectOption(
                 label="Postulaciones",
-                description="Postulaciones relacionadas con el Staff-Team.",
+                description="Postulaciones para el Staff-Team de InfernMC.",
                 emoji="📋",
                 value="postulaciones"
             ),
 
             discord.SelectOption(
                 label="Tienda",
-                description="Dudas o problemas relacionados con la tienda.",
+                description="Dudas o problemas con la tienda del servidor.",
                 emoji="📯",
                 value="tienda"
+            ),
+
+            discord.SelectOption(
+                label="Sanciones",
+                description="Dudas o protestas relacionadas con sanciones.",
+                emoji="🗂️",
+                value="sanciones"
             )
 
         ]
@@ -93,7 +98,6 @@ class TicketSelect(discord.ui.Select):
             options=options,
             custom_id="infernmc_ticket_category"
         )
-
 
     async def callback(self, interaction: discord.Interaction):
 
@@ -124,18 +128,56 @@ class TicketSelect(discord.ui.Select):
 
                 return
 
-        # Obtener categoría seleccionada
+        # Datos de la categoría
 
-        categoria = self.values[0]
+        categorias = {
 
-        nombres = {
-            "ayuda": "Ayuda General",
-            "bugs": "Bugs",
-            "postulaciones": "Postulaciones",
-            "tienda": "Tienda"
+            "ayuda_general": {
+                "nombre": "Ayuda General",
+                "emoji": "🎲",
+                "descripcion":
+                    "¿Necesitas ayuda en algo en general? "
+                    "Esta categoría sirve para dudas relacionadas "
+                    "con Discord o Minecraft."
+            },
+
+            "bugs": {
+                "nombre": "Bugs",
+                "emoji": "🎗️",
+                "descripcion":
+                    "¿Has encontrado un bug en nuestro servidor "
+                    "o en el Discord? Abre ticket en esta categoría."
+            },
+
+            "postulaciones": {
+                "nombre": "Postulaciones",
+                "emoji": "📋",
+                "descripcion":
+                    "¿Has sido aceptado en el Staff-Team de InfernMC? "
+                    "Enhorabuena por pasar la primera fase."
+            },
+
+            "tienda": {
+                "nombre": "Tienda",
+                "emoji": "📯",
+                "descripcion":
+                    "Si tienes una duda o problema con la tienda "
+                    "del servidor, aquí se resolverá todo lo relacionado "
+                    "con ella."
+            },
+
+            "sanciones": {
+                "nombre": "Sanciones",
+                "emoji": "🗂️",
+                "descripcion":
+                    "¿Has sido sancionado en el servidor de InfernMC "
+                    "o tienes alguna duda sobre tu sanción y quieres "
+                    "protestar contra ella?"
+            }
+
         }
 
-        nombre_categoria = nombres[categoria]
+        datos = categorias[self.values[0]]
 
         # Permisos
 
@@ -166,7 +208,7 @@ class TicketSelect(discord.ui.Select):
                     read_message_history=True
                 )
 
-        # Crear ticket
+        # Crear canal
 
         channel = await guild.create_text_channel(
             f"ticket-{member.id}",
@@ -174,17 +216,23 @@ class TicketSelect(discord.ui.Select):
             overwrites=overwrites
         )
 
-        # Mensaje dentro del ticket
+        # Mensaje del ticket
 
         await channel.send(
+
             f"{member.mention}\n\n"
-            f"**Categoría:** {nombre_categoria}\n\n"
-            "Tu ticket ha sido creado correctamente.\n"
+
+            f"{datos['emoji']} **{datos['nombre']}**\n\n"
+
+            f"{datos['descripcion']}\n\n"
+
             "Un miembro del staff te atenderá lo antes posible.\n\n"
+
             "**Recuerda:**\n"
             "• Sé claro y directo.\n"
             "• No insultes al staff.\n"
             "• No abras demasiados tickets simultáneamente.",
+
             view=TicketControlView()
         )
 
@@ -195,49 +243,16 @@ class TicketSelect(discord.ui.Select):
 
 
 # =========================
-# VIEW DEL MENÚ
+# PANEL DE TICKETS
 # =========================
 
-class TicketCategoryView(discord.ui.View):
+class TicketPanelView(discord.ui.View):
 
     def __init__(self):
 
         super().__init__(timeout=None)
 
         self.add_item(TicketSelect())
-
-
-# =========================
-# PANEL PRINCIPAL
-# =========================
-
-class TicketView(discord.ui.View):
-
-    def __init__(self):
-
-        super().__init__(timeout=None)
-
-
-    @discord.ui.button(
-        label="Crear ticket",
-        style=discord.ButtonStyle.green,
-        custom_id="infernmc_create_ticket"
-    )
-    async def create_ticket(
-        self,
-        interaction: discord.Interaction,
-        button: discord.ui.Button
-    ):
-
-        await interaction.response.send_message(
-            "**Selecciona una categoría para tu ticket:**\n\n"
-            "🎲 **Ayuda General** — Dudas generales sobre Discord o Minecraft.\n"
-            "🎗️ **Bugs** — Reporta errores del servidor o Discord.\n"
-            "📋 **Postulaciones** — Postulaciones para el Staff-Team.\n"
-            "📯 **Tienda** — Dudas o problemas relacionados con la tienda.",
-            view=TicketCategoryView(),
-            ephemeral=True
-        )
 
 
 # =========================
@@ -249,7 +264,6 @@ class TicketControlView(discord.ui.View):
     def __init__(self):
 
         super().__init__(timeout=None)
-
 
     @discord.ui.button(
         label="Reclamar",
@@ -274,7 +288,6 @@ class TicketControlView(discord.ui.View):
         await interaction.response.send_message(
             f"Ticket reclamado por {interaction.user.mention}."
         )
-
 
     @discord.ui.button(
         label="Cerrar",
@@ -312,18 +325,24 @@ class TicketControlView(discord.ui.View):
 async def ticketpanel(ctx):
 
     await ctx.send(
-        "# Soporte InfernMc\n\n"
-        "¿Necesitas ayuda? No dudes en abrir ticket para "
-        "una atención mediante el staff del servidor.\n\n"
+
+        "# ¿Necesitas ayuda?\n\n"
+
+        "No dudes en abrir ticket para una atención mediante "
+        "el staff del servidor.\n\n"
 
         "**Ten en cuenta:**\n"
         "• No abras demasiados tickets simultáneamente.\n"
         "• No insultes al staff, podrías ser sancionado.\n"
-        "• Sé claro y directo al crear tu ticket.\n\n"
+        "• Recuerda ser claro y directo a la hora de hacer un ticket.\n\n"
 
-        "Los tickets se dividen en diferentes categorías "
-        "para atender cada situación.",
-        view=TicketView()
+        "Los tickets se dividen en diferentes categorías, "
+        "las cuales incluyen diferentes situaciones que pueden "
+        "pasar en el servidor.\n\n"
+
+        "Selecciona una categoría en el menú desplegable:",
+
+        view=TicketPanelView()
     )
 
 
