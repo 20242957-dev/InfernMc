@@ -4,6 +4,7 @@ import asyncio
 import discord
 from discord.ext import commands
 
+
 # =========================================================
 # INTENTS
 # =========================================================
@@ -16,6 +17,7 @@ bot = commands.Bot(
     command_prefix="!",
     intents=intents
 )
+
 
 # =========================================================
 # CONFIGURACIÓN
@@ -34,7 +36,7 @@ POSTULACIONES_EMOJI = discord.PartialEmoji(
 
 
 # =========================================================
-# INFORMACIÓN DE CATEGORÍAS
+# CATEGORÍAS DE TICKETS
 # =========================================================
 
 CATEGORIAS = {
@@ -97,20 +99,64 @@ CATEGORIAS = {
 
 
 # =========================================================
+# FUNCIÓN DE BIENVENIDA
+# =========================================================
+
+def crear_embed_bienvenida(member):
+
+    embed = discord.Embed(
+        title="¡Bienvenido/a a InfernMC!",
+        description=(
+            f"¡Bienvenido/a {member.mention}!\n\n"
+            "Esperamos que disfrutes tu estancia en el servidor.\n"
+            "No olvides leer las normas y disfrutar de InfernMC."
+        ),
+        color=discord.Color.blurple()
+    )
+
+    embed.set_thumbnail(
+        url=member.display_avatar.url
+    )
+
+    embed.add_field(
+        name="👤 Usuario",
+        value=member.mention,
+        inline=True
+    )
+
+    embed.add_field(
+        name="📊 Miembros",
+        value=str(member.guild.member_count),
+        inline=True
+    )
+
+    embed.set_footer(
+        text="InfernMC • Sistema de bienvenidas"
+    )
+
+    return embed
+
+
+# =========================================================
 # BOT LISTO
 # =========================================================
 
 @bot.event
 async def on_ready():
 
-    print(f"InfernMc conectado como {bot.user}")
+    print(f"InfernMC conectado como {bot.user}")
 
-    bot.add_view(TicketPanelView())
-    bot.add_view(TicketControlView())
+    bot.add_view(
+        TicketPanelView()
+    )
+
+    bot.add_view(
+        TicketControlView()
+    )
 
 
 # =========================================================
-# BIENVENIDAS
+# BIENVENIDA
 # =========================================================
 
 @bot.event
@@ -120,15 +166,20 @@ async def on_member_join(member):
         WELCOME_CHANNEL_ID
     )
 
-    if channel:
+    if channel is None:
+        return
 
-        await channel.send(
-            f"¡Bienvenido/a al servidor, {member.mention}! 🎉"
-        )
+    embed = crear_embed_bienvenida(
+        member
+    )
+
+    await channel.send(
+        embed=embed
+    )
 
 
 # =========================================================
-# PRUEBA DE BIENVENIDA
+# TEST DE BIENVENIDA
 # =========================================================
 
 @bot.command()
@@ -147,8 +198,12 @@ async def testbienvenida(ctx):
 
         return
 
+    embed = crear_embed_bienvenida(
+        ctx.author
+    )
+
     await channel.send(
-        f"¡Bienvenido/a al servidor, {ctx.author.mention}! 🎉"
+        embed=embed
     )
 
     await ctx.send(
@@ -173,7 +228,7 @@ class TicketModal(discord.ui.Modal):
         )
 
         # -------------------------------------------------
-        # PREGUNTA 1
+        # NICK
         # -------------------------------------------------
 
         self.nick = discord.ui.TextInput(
@@ -189,7 +244,7 @@ class TicketModal(discord.ui.Modal):
         )
 
         # -------------------------------------------------
-        # PREGUNTA 2
+        # PREGUNTA ESPECÍFICA
         # -------------------------------------------------
 
         self.problema = discord.ui.TextInput(
@@ -227,9 +282,9 @@ class TicketModal(discord.ui.Modal):
 
             return
 
-        # =================================================
-        # COMPROBAR TICKET EXISTENTE
-        # =================================================
+        # -------------------------------------------------
+        # COMPROBAR SI YA TIENE TICKET
+        # -------------------------------------------------
 
         for channel in category.channels:
 
@@ -242,10 +297,6 @@ class TicketModal(discord.ui.Modal):
 
                 return
 
-        # =================================================
-        # RESPUESTAS
-        # =================================================
-
         nick = self.nick.value
         respuesta = self.problema.value
 
@@ -253,9 +304,9 @@ class TicketModal(discord.ui.Modal):
             self.categoria
         ]
 
-        # =================================================
+        # -------------------------------------------------
         # PERMISOS
-        # =================================================
+        # -------------------------------------------------
 
         overwrites = {
 
@@ -272,7 +323,7 @@ class TicketModal(discord.ui.Modal):
                 )
         }
 
-        # Dar acceso a administradores
+        # Administradores
 
         for role in guild.roles:
 
@@ -284,9 +335,9 @@ class TicketModal(discord.ui.Modal):
                     read_message_history=True
                 )
 
-        # =================================================
+        # -------------------------------------------------
         # CREAR CANAL
-        # =================================================
+        # -------------------------------------------------
 
         channel = await guild.create_text_channel(
             f"ticket-{member.id}",
@@ -294,9 +345,9 @@ class TicketModal(discord.ui.Modal):
             overwrites=overwrites
         )
 
-        # =================================================
-        # GUARDAR INFORMACIÓN EN TOPIC
-        # =================================================
+        # -------------------------------------------------
+        # TOPIC
+        # -------------------------------------------------
 
         await channel.edit(
             topic=(
@@ -306,9 +357,9 @@ class TicketModal(discord.ui.Modal):
             )
         )
 
-        # =================================================
+        # -------------------------------------------------
         # EMBED DEL TICKET
-        # =================================================
+        # -------------------------------------------------
 
         embed = discord.Embed(
             title=datos["nombre"],
@@ -320,23 +371,17 @@ class TicketModal(discord.ui.Modal):
             color=discord.Color.blurple()
         )
 
-        # Nick
-
         embed.add_field(
             name="¿Nick?",
             value=nick,
             inline=False
         )
 
-        # Pregunta específica
-
         embed.add_field(
             name=datos["pregunta"],
             value=respuesta,
             inline=False
         )
-
-        # Información
 
         embed.add_field(
             name="Categoría",
@@ -360,10 +405,6 @@ class TicketModal(discord.ui.Modal):
             view=TicketControlView()
         )
 
-        # =================================================
-        # CONFIRMACIÓN
-        # =================================================
-
         await interaction.response.send_message(
             f"Ticket creado correctamente: {channel.mention}",
             ephemeral=True
@@ -371,7 +412,7 @@ class TicketModal(discord.ui.Modal):
 
 
 # =========================================================
-# MENÚ DE CATEGORÍAS
+# SELECTOR DE CATEGORÍAS
 # =========================================================
 
 class TicketSelect(discord.ui.Select):
@@ -637,7 +678,7 @@ class RatingView(discord.ui.View):
 
 
 # =========================================================
-# CREAR TRANSCRIPT
+# TRANSCRIPT
 # =========================================================
 
 async def crear_transcript(channel):
@@ -656,7 +697,6 @@ async def crear_transcript(channel):
         contenido = message.content
 
         if not contenido:
-
             contenido = "[Sin contenido de texto]"
 
         mensajes.append(
@@ -690,7 +730,7 @@ async def crear_transcript(channel):
 
 
 # =========================================================
-# CONTROL DE TICKETS
+# BOTONES DEL TICKET
 # =========================================================
 
 class TicketControlView(discord.ui.View):
@@ -727,7 +767,6 @@ class TicketControlView(discord.ui.View):
             return
 
         channel = interaction.channel
-
         topic = channel.topic or ""
 
         if (
@@ -755,15 +794,21 @@ class TicketControlView(discord.ui.View):
                 )
 
             except:
-
                 pass
+
+        categoria = "desconocida"
+
+        if "Categoria:" in topic:
+
+            categoria = topic.split(
+                "Categoria:"
+            )[-1]
 
         await channel.edit(
             topic=(
                 f"Owner:{owner_id}|"
                 f"Staff:{interaction.user.id}|"
-                f"Categoria:"
-                f"{topic.split('Categoria:')[-1]}"
+                f"Categoria:{categoria}"
             )
         )
 
@@ -797,15 +842,14 @@ class TicketControlView(discord.ui.View):
             return
 
         channel = interaction.channel
-
         topic = channel.topic or ""
 
         owner_id = None
         staff_id = None
 
-        # =================================================
+        # -------------------------------------------------
         # OWNER
-        # =================================================
+        # -------------------------------------------------
 
         if "Owner:" in topic:
 
@@ -818,12 +862,11 @@ class TicketControlView(discord.ui.View):
                 )
 
             except:
-
                 pass
 
-        # =================================================
+        # -------------------------------------------------
         # STAFF
-        # =================================================
+        # -------------------------------------------------
 
         if "Staff:" in topic:
 
@@ -842,20 +885,15 @@ class TicketControlView(discord.ui.View):
                     )
 
             except:
-
                 pass
-
-        # =================================================
-        # AVISO
-        # =================================================
 
         await interaction.response.send_message(
             "Generando transcript y cerrando ticket..."
         )
 
-        # =================================================
+        # -------------------------------------------------
         # TRANSCRIPT
-        # =================================================
+        # -------------------------------------------------
 
         transcript = await crear_transcript(
             channel
@@ -920,9 +958,9 @@ class TicketControlView(discord.ui.View):
                 file=archivo
             )
 
-        # =================================================
+        # -------------------------------------------------
         # VALORACIÓN
-        # =================================================
+        # -------------------------------------------------
 
         if owner_id:
 
@@ -971,7 +1009,6 @@ class TicketControlView(discord.ui.View):
                 )
 
             except discord.Forbidden:
-
                 pass
 
             except Exception as error:
@@ -980,9 +1017,9 @@ class TicketControlView(discord.ui.View):
                     f"Error enviando valoración: {error}"
                 )
 
-        # =================================================
-        # ESPERAR Y BORRAR
-        # =================================================
+        # -------------------------------------------------
+        # ELIMINAR
+        # -------------------------------------------------
 
         await asyncio.sleep(3)
 
@@ -990,16 +1027,16 @@ class TicketControlView(discord.ui.View):
 
 
 # =========================================================
-# COMANDO DEL PANEL
+# COMANDO PARA CREAR PANEL
 # =========================================================
 
 @bot.command()
 @commands.has_permissions(administrator=True)
 async def ticketpanel(ctx):
 
-    # =====================================================
-    # BORRAR PANELES ANTERIORES
-    # =====================================================
+    # -----------------------------------------------------
+    # BORRAR MENSAJES ANTERIORES DEL BOT
+    # -----------------------------------------------------
 
     async for message in ctx.channel.history(
         limit=50
@@ -1008,16 +1045,13 @@ async def ticketpanel(ctx):
         if message.author == bot.user:
 
             try:
-
                 await message.delete()
-
             except:
-
                 pass
 
-    # =====================================================
-    # PANEL
-    # =====================================================
+    # -----------------------------------------------------
+    # EMBED
+    # -----------------------------------------------------
 
     embed = discord.Embed(
         title="¿Necesitas ayuda?",
@@ -1066,7 +1100,6 @@ async def ticketpanel(ctx):
             "alguna duda sobre tu sanción y quieres protestar en contra "
             "de esta."
         ),
-
         color=discord.Color.blurple()
     )
 
@@ -1084,7 +1117,9 @@ async def ticketpanel(ctx):
 # TOKEN
 # =========================================================
 
-TOKEN = os.getenv("DISCORD_TOKEN")
+TOKEN = os.getenv(
+    "DISCORD_TOKEN"
+)
 
 if not TOKEN:
 
