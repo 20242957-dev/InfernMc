@@ -1,18 +1,16 @@
 import discord
 from discord.ext import commands
 from discord.ui import View, Button, Select, Modal, TextInput
-
 import sqlite3
 import os
-import re
-import io
 import asyncio
+import re
 from datetime import datetime, timezone
 
 
-# ============================================================
+# =========================================================
 # CONFIGURACIÓN
-# ============================================================
+# =========================================================
 
 TOKEN = os.getenv("DISCORD_TOKEN")
 
@@ -21,14 +19,15 @@ TICKET_CATEGORY_ID = 1548528404649873438
 VALORACIONES_CHANNEL_ID = 1550534072449900684
 TRANSCRIPTS_CHANNEL_ID = 1548694373875585125
 
-POSTULACIONES_EMOJI = "<:573567deadhamster:1549076149399715840>"
+POSTULACIONES_EMOJI_ID = 1549076149399715840
+POSTULACIONES_EMOJI_NAME = "573567deadhamster"
 
-DB_NAME = "infernmc.db"
+DATABASE = "infernmc.db"
 
 
-# ============================================================
+# =========================================================
 # INTENTS
-# ============================================================
+# =========================================================
 
 intents = discord.Intents.default()
 
@@ -37,19 +36,20 @@ intents.message_content = True
 intents.presences = True
 
 
-# ============================================================
+# =========================================================
 # BOT
-# ============================================================
+# =========================================================
 
 class InfernMCBot(commands.Bot):
 
     async def setup_hook(self):
 
-        # Views persistentes
+        print("[BOT] Registrando vistas permanentes...")
+
         self.add_view(TicketPanelView())
         self.add_view(TicketControlView())
 
-        print("Views persistentes cargadas.")
+        print("[BOT] Vistas registradas.")
 
 
 bot = InfernMCBot(
@@ -58,13 +58,17 @@ bot = InfernMCBot(
 )
 
 
-# ============================================================
+# =========================================================
 # BASE DE DATOS
-# ============================================================
+# =========================================================
 
-db = sqlite3.connect(DB_NAME)
+db = sqlite3.connect(
+    DATABASE,
+    check_same_thread=False
+)
 
 cursor = db.cursor()
+
 
 cursor.execute("""
 CREATE TABLE IF NOT EXISTS staff (
@@ -78,12 +82,14 @@ CREATE TABLE IF NOT EXISTS staff (
 )
 """)
 
+
 cursor.execute("""
 CREATE TABLE IF NOT EXISTS config (
     key TEXT PRIMARY KEY,
     value TEXT
 )
 """)
+
 
 cursor.execute("""
 CREATE TABLE IF NOT EXISTS ratings (
@@ -96,6 +102,7 @@ CREATE TABLE IF NOT EXISTS ratings (
 )
 """)
 
+
 cursor.execute("""
 CREATE TABLE IF NOT EXISTS ai_reviews (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -107,38 +114,155 @@ CREATE TABLE IF NOT EXISTS ai_reviews (
 )
 """)
 
+
 db.commit()
 
 
-# ============================================================
-# FUNCIONES DE BASE DE DATOS
-# ============================================================
+# =========================================================
+# CATEGORÍAS
+# =========================================================
+
+CATEGORIAS = {
+
+    "general": {
+        "label": "🎲 Ayuda General",
+        "pregunta": "¿En qué necesitas ayuda?"
+    },
+
+    "bugs": {
+        "label": "🎗️ Bugs",
+        "pregunta": "¿Qué bug encontraste?"
+    },
+
+    "postulaciones": {
+        "label": "Postulaciones",
+        "pregunta": "¿Por qué quieres formar parte del Staff-Team?"
+    },
+
+    "tienda": {
+        "label": "📯 Tienda",
+        "pregunta": "¿Cuál es tu problema con la tienda?"
+    },
+
+    "sanciones": {
+        "label": "🗂️ Sanciones",
+        "pregunta": "¿Por qué motivo quieres apelar tu sanción?"
+    }
+
+}
+
+
+# =========================================================
+# FUNCIONES GENERALES
+# =========================================================
+
+def es_admin(member):
+
+    if not isinstance(member, discord.Member):
+        return False
+
+    return member.guild_permissions.administrator
+
 
 def asegurar_staff(user_id):
 
     cursor.execute(
-        """
-        INSERT OR IGNORE INTO staff
-        (user_id)
-        VALUES (?)
-        """,
+        "SELECT user_id FROM staff WHERE user_id = ?",
         (user_id,)
     )
 
-    db.commit()
+    resultado = cursor.fetchone()
+
+    if resultado is None:
+
+        cursor.execute(
+            """
+            INSERT INTO staff (
+                user_id,
+                total_points,
+                weekly_points,
+                tickets_claimed,
+                ratings_received,
+                ai_reviews,
+                ai_points
+            )
+            VALUES (?, 0, 0, 0, 0, 0, 0)
+            """,
+            (user_id,)
+        )
+
+        db.commit()
 
 
-def sumar_puntos(user_id, puntos, tipo):
+def semana_actual():
+
+    return datetime.now(
+        timezone.utc
+    ).isocalendar().week
+
+
+def revisar_reset_semanal():
+
+    semana = str(semana_actual())
+
+    cursor.execute(
+        "SELECT value FROM config WHERE key = 'week'",
+    )
+
+    resultado = cursor.fetchone()
+
+    if resultado is None:
+
+        cursor.execute(
+            """
+            INSERT INTO config (key, value)
+            VALUES ('week', ?)
+            """,
+            (semana,)
+        )
+
+        db.commit()
+
+        return
+
+    semana_guardada = resultado[0]
+
+    if semana_guardada != semana:
+
+        cursor.execute(
+            """
+            UPDATE staff
+            SET weekly_points = 0
+            """
+        )
+
+        cursor.execute(
+            """
+            UPDATE config
+            SET value = ?
+            WHERE key = 'week'
+            """,
+            (semana,)
+        )
+
+        db.commit()
+
+        print("[STAFF] Ranking semanal reiniciado.")
+
+
+def sumar_puntos(
+    user_id,
+    puntos,
+    tipo=None
+):
 
     asegurar_staff(user_id)
 
     cursor.execute(
         """
         UPDATE staff
-
         SET total_points = total_points + ?,
             weekly_points = weekly_points + ?
-
         WHERE user_id = ?
         """,
         (
@@ -148,15 +272,12 @@ def sumar_puntos(user_id, puntos, tipo):
         )
     )
 
-    if tipo == "claim":
+    if tipo == "ticket":
 
         cursor.execute(
             """
             UPDATE staff
-
-            SET tickets_claimed =
-                tickets_claimed + 1
-
+            SET tickets_claimed = tickets_claimed + 1
             WHERE user_id = ?
             """,
             (user_id,)
@@ -167,10 +288,7 @@ def sumar_puntos(user_id, puntos, tipo):
         cursor.execute(
             """
             UPDATE staff
-
-            SET ratings_received =
-                ratings_received + 1
-
+            SET ratings_received = ratings_received + 1
             WHERE user_id = ?
             """,
             (user_id,)
@@ -181,10 +299,8 @@ def sumar_puntos(user_id, puntos, tipo):
         cursor.execute(
             """
             UPDATE staff
-
             SET ai_reviews = ai_reviews + 1,
                 ai_points = ai_points + ?
-
             WHERE user_id = ?
             """,
             (
@@ -196,170 +312,63 @@ def sumar_puntos(user_id, puntos, tipo):
     db.commit()
 
 
-def semana_actual():
-
-    ahora = datetime.now(timezone.utc)
-
-    return ahora.isocalendar().week
-
-
-def revisar_reset_semanal():
-
-    semana = str(semana_actual())
-
-    cursor.execute(
-        """
-        SELECT value
-        FROM config
-        WHERE key = 'staff_week'
-        """
-    )
-
-    resultado = cursor.fetchone()
-
-    if resultado is None:
-
-        cursor.execute(
-            """
-            INSERT INTO config
-            (key, value)
-
-            VALUES
-            ('staff_week', ?)
-            """,
-            (semana,)
-        )
-
-        db.commit()
-
-        return
-
-    if resultado[0] != semana:
-
-        cursor.execute(
-            """
-            UPDATE staff
-
-            SET weekly_points = 0
-            """
-        )
-
-        cursor.execute(
-            """
-            UPDATE config
-
-            SET value = ?
-
-            WHERE key = 'staff_week'
-            """,
-            (semana,)
-        )
-
-        db.commit()
-
-
-def es_admin(member):
-
-    return member.guild_permissions.administrator
-
-
-# ============================================================
-# CATEGORÍAS
-# ============================================================
-
-CATEGORIAS = {
-
-    "general": {
-        "label": "Ayuda General",
-        "emoji": "🎲",
-        "descripcion":
-            "Necesitas ayuda con cualquier problema general.",
-        "pregunta":
-            "¿En qué necesitas ayuda?"
-    },
-
-    "bugs": {
-        "label": "Bugs",
-        "emoji": "🎗️",
-        "descripcion":
-            "Reporta errores o problemas del servidor.",
-        "pregunta":
-            "¿Qué bug encontraste?"
-    },
-
-    "postulaciones": {
-        "label": "Postulaciones",
-        "emoji": POSTULACIONES_EMOJI,
-        "descripcion":
-            "Postúlate para formar parte del Staff-Team.",
-        "pregunta":
-            "¿Por qué quieres formar parte del Staff-Team?"
-    },
-
-    "tienda": {
-        "label": "Tienda",
-        "emoji": "📯",
-        "descripcion":
-            "Problemas relacionados con la tienda.",
-        "pregunta":
-            "¿Cuál es tu problema con la tienda?"
-    },
-
-    "sanciones": {
-        "label": "Sanciones",
-        "emoji": "🗂️",
-        "descripcion":
-            "Apela una sanción aplicada en el servidor.",
-        "pregunta":
-            "¿Por qué motivo quieres apelar tu sanción?"
-    }
-}
-
-
-# ============================================================
-# FUNCIONES DE TICKETS
-# ============================================================
-
 def obtener_datos_ticket(channel):
 
     topic = channel.topic or ""
 
-    datos = {}
+    owner = None
+    staff = None
+    categoria = None
 
     for parte in topic.split("|"):
 
-        if ":" not in parte:
+        if parte.startswith("Owner:"):
+            owner = parte.replace(
+                "Owner:",
+                ""
+            )
+
+        elif parte.startswith("Staff:"):
+            staff = parte.replace(
+                "Staff:",
+                ""
+            )
+
+        elif parte.startswith("Categoria:"):
+            categoria = parte.replace(
+                "Categoria:",
+                ""
+            )
+
+    return owner, staff, categoria
+
+
+def buscar_ticket_usuario(
+    guild,
+    user_id
+):
+
+    for channel in guild.text_channels:
+
+        if not channel.name.startswith("ticket-"):
             continue
 
-        clave, valor = parte.split(":", 1)
+        owner, staff, categoria = obtener_datos_ticket(
+            channel
+        )
 
-        datos[clave.lower()] = valor
+        if owner == str(user_id):
 
-    return datos
-
-
-def buscar_ticket_usuario(guild, user_id):
-
-    categoria = guild.get_channel(
-        TICKET_CATEGORY_ID
-    )
-
-    if categoria is None:
-        return None
-
-    for canal in categoria.channels:
-
-        if canal.name == f"ticket-{user_id}":
-            return canal
+            return channel
 
     return None
 
 
-# ============================================================
-# MODAL
-# ============================================================
+# =========================================================
+# TICKET MODAL
+# =========================================================
 
-class TicketModal(Modal):
+class TicketModal(discord.ui.Modal):
 
     def __init__(self, categoria):
 
@@ -368,7 +377,7 @@ class TicketModal(Modal):
         info = CATEGORIAS[categoria]
 
         super().__init__(
-            title=f"Ticket • {info['label']}"
+            title=f"Ticket - {info['label']}"
         )
 
         self.nick = TextInput(
@@ -392,293 +401,431 @@ class TicketModal(Modal):
         self.add_item(self.nick)
         self.add_item(self.motivo)
 
-    async def on_submit(self, interaction):
 
-        guild = interaction.guild
-
-        if guild is None:
-
-            await interaction.response.send_message(
-                "No se pudo detectar el servidor.",
-                ephemeral=True
-            )
-
-            return
-
-        # ----------------------------------------------------
-        # COMPROBAR CATEGORÍA
-        # ----------------------------------------------------
-
-        categoria_discord = guild.get_channel(
-            TICKET_CATEGORY_ID
-        )
-
-        if categoria_discord is None:
-
-            await interaction.response.send_message(
-                "La categoría de tickets no existe. "
-                "Revisa TICKET_CATEGORY_ID en el código.",
-                ephemeral=True
-            )
-
-            return
-
-        if not isinstance(
-            categoria_discord,
-            discord.CategoryChannel
-        ):
-
-            await interaction.response.send_message(
-                "El ID configurado no corresponde a una categoría.",
-                ephemeral=True
-            )
-
-            return
-
-        # ----------------------------------------------------
-        # COMPROBAR TICKET EXISTENTE
-        # ----------------------------------------------------
-
-        ticket_existente = buscar_ticket_usuario(
-            guild,
-            interaction.user.id
-        )
-
-        if ticket_existente:
-
-            await interaction.response.send_message(
-                f"Ya tienes un ticket abierto: "
-                f"{ticket_existente.mention}",
-                ephemeral=True
-            )
-
-            return
-
-        # ----------------------------------------------------
-        # PERMISOS
-        # ----------------------------------------------------
-
-        overwrites = {
-
-            guild.default_role:
-                discord.PermissionOverwrite(
-                    view_channel=False
-                ),
-
-            interaction.user:
-                discord.PermissionOverwrite(
-                    view_channel=True,
-                    send_messages=True,
-                    read_message_history=True,
-                    attach_files=True,
-                    embed_links=True
-                )
-        }
-
-        # Administradores
-        for role in guild.roles:
-
-            if role.permissions.administrator:
-
-                overwrites[role] = discord.PermissionOverwrite(
-                    view_channel=True,
-                    send_messages=True,
-                    read_message_history=True,
-                    manage_channels=True,
-                    attach_files=True,
-                    embed_links=True
-                )
-
-        # ----------------------------------------------------
-        # CREAR CANAL
-        # ----------------------------------------------------
+    async def on_submit(
+        self,
+        interaction: discord.Interaction
+    ):
 
         try:
-
-            canal = await guild.create_text_channel(
-                name=f"ticket-{interaction.user.id}",
-                category=categoria_discord,
-                overwrites=overwrites,
-                topic=(
-                    f"Owner:{interaction.user.id}"
-                    f"|Staff:Sin reclamar"
-                    f"|Categoria:{self.categoria}"
-                ),
-                reason="Creación de ticket InfernMC"
-            )
-
-        except discord.Forbidden:
-
-            await interaction.response.send_message(
-                "El bot no tiene permisos para crear canales.",
-                ephemeral=True
-            )
-
-            return
-
-        except Exception as e:
 
             print(
-                "ERROR CREANDO TICKET:",
-                repr(e)
+                f"[TICKETS] Creando ticket para "
+                f"{interaction.user}"
             )
 
-            await interaction.response.send_message(
-                "Ocurrió un error al crear el ticket.",
-                ephemeral=True
-            )
+            guild = interaction.guild
 
-            return
-
-        # ----------------------------------------------------
-        # EMBED
-        # ----------------------------------------------------
-
-        info = CATEGORIAS[self.categoria]
-
-        embed = discord.Embed(
-            title=f"🎫 Ticket • {info['label']}",
-            description=(
-                f"Hola {interaction.user.mention}.\n\n"
-                "Un miembro del Staff-Team atenderá "
-                "tu ticket lo antes posible.\n\n"
-                "**Información proporcionada:**"
-            ),
-            color=discord.Color.red()
-        )
-
-        embed.add_field(
-            name="Nick",
-            value=self.nick.value,
-            inline=False
-        )
-
-        embed.add_field(
-            name="Motivo",
-            value=self.motivo.value,
-            inline=False
-        )
-
-        embed.add_field(
-            name="Categoría",
-            value=info["label"],
-            inline=True
-        )
-
-        embed.add_field(
-            name="Estado",
-            value="Sin reclamar",
-            inline=True
-        )
-
-        embed.set_footer(
-            text="InfernMC • Sistema de tickets"
-        )
-
-        try:
-
-            await canal.send(
-                content=interaction.user.mention,
-                embed=embed,
-                view=TicketControlView()
-            )
-
-        except Exception as e:
-
-            print(
-                "ERROR ENVIANDO MENSAJE DEL TICKET:",
-                repr(e)
-            )
-
-            try:
-                await canal.delete()
-            except:
-                pass
-
-            await interaction.response.send_message(
-                "El canal fue creado pero no pude enviar "
-                "el mensaje del ticket. Revisa los permisos del bot.",
-                ephemeral=True
-            )
-
-            return
-
-        # ----------------------------------------------------
-        # RESPUESTA
-        # ----------------------------------------------------
-
-        await interaction.response.send_message(
-            f"Ticket creado correctamente: {canal.mention}",
-            ephemeral=True
-        )
-
-
-# ============================================================
-# SELECTOR DE TICKETS
-# ============================================================
-
-class TicketSelect(Select):
-
-    def __init__(self):
-
-        opciones = []
-
-        for key, info in CATEGORIAS.items():
-
-            opciones.append(
-                discord.SelectOption(
-                    label=info["label"],
-                    description=info["descripcion"][:100],
-                    emoji=info["emoji"],
-                    value=key
-                )
-            )
-
-        super().__init__(
-            placeholder="Selecciona una categoría...",
-            min_values=1,
-            max_values=1,
-            options=opciones,
-            custom_id="infernmc_ticket_category_select"
-        )
-
-    async def callback(self, interaction):
-
-        try:
-
-            categoria = self.values[0]
-
-            if categoria not in CATEGORIAS:
+            if guild is None:
 
                 await interaction.response.send_message(
-                    "Categoría inválida.",
+                    "No se pudo detectar el servidor.",
                     ephemeral=True
                 )
 
                 return
 
-            # IMPORTANTE:
-            # El Modal se abre desde la interacción
-            await interaction.response.send_modal(
-                TicketModal(categoria)
+
+            # Respondemos inmediatamente
+            await interaction.response.defer(
+                ephemeral=True
             )
 
-        except Exception as e:
 
-            print(
-                "ERROR EN SELECT DE TICKET:",
-                repr(e)
+            categoria_discord = guild.get_channel(
+                TICKET_CATEGORY_ID
             )
 
-            if not interaction.response.is_done():
 
-                await interaction.response.send_message(
-                    "No se pudo abrir el formulario.",
+            if categoria_discord is None:
+
+                await interaction.followup.send(
+                    "No encuentro la categoría de tickets.",
                     ephemeral=True
                 )
 
+                return
 
-class TicketPanelView(View):
+
+            if not isinstance(
+                categoria_discord,
+                discord.CategoryChannel
+            ):
+
+                await interaction.followup.send(
+                    "El ID configurado no corresponde "
+                    "a una categoría de Discord.",
+                    ephemeral=True
+                )
+
+                return
+
+
+            # Comprobar ticket existente
+
+            ticket_existente = buscar_ticket_usuario(
+                guild,
+                interaction.user.id
+            )
+
+
+            if ticket_existente:
+
+                await interaction.followup.send(
+                    f"Ya tienes un ticket abierto: "
+                    f"{ticket_existente.mention}",
+                    ephemeral=True
+                )
+
+                return
+
+
+            # Permisos
+
+            overwrites = {
+
+                guild.default_role:
+                    discord.PermissionOverwrite(
+                        view_channel=False
+                    ),
+
+                interaction.user:
+                    discord.PermissionOverwrite(
+                        view_channel=True,
+                        send_messages=True,
+                        read_message_history=True,
+                        attach_files=True,
+                        embed_links=True
+                    )
+
+            }
+
+
+            # Administradores
+
+            for role in guild.roles:
+
+                if role.permissions.administrator:
+
+                    overwrites[role] = (
+                        discord.PermissionOverwrite(
+                            view_channel=True,
+                            send_messages=True,
+                            read_message_history=True,
+                            manage_channels=True,
+                            attach_files=True,
+                            embed_links=True
+                        )
+                    )
+
+
+            # Crear canal
+
+            canal = await guild.create_text_channel(
+
+                name=f"ticket-{interaction.user.id}",
+
+                category=categoria_discord,
+
+                overwrites=overwrites,
+
+                topic=(
+                    f"Owner:{interaction.user.id}"
+                    f"|Staff:Sin reclamar"
+                    f"|Categoria:{self.categoria}"
+                ),
+
+                reason="Creación de ticket InfernMC"
+
+            )
+
+
+            info = CATEGORIAS[
+                self.categoria
+            ]
+
+
+            # Embed
+
+            embed = discord.Embed(
+
+                title=f"🎫 Ticket - {info['label']}",
+
+                description=(
+                    f"Hola {interaction.user.mention}.\n\n"
+                    "Un miembro del Staff-Team atenderá "
+                    "tu ticket lo antes posible.\n\n"
+                    "**Información proporcionada:**"
+                ),
+
+                color=discord.Color.red()
+
+            )
+
+
+            embed.add_field(
+                name="Nick",
+                value=self.nick.value,
+                inline=False
+            )
+
+
+            embed.add_field(
+                name="Motivo",
+                value=self.motivo.value,
+                inline=False
+            )
+
+
+            embed.add_field(
+                name="Categoría",
+                value=info["label"],
+                inline=True
+            )
+
+
+            embed.add_field(
+                name="Estado",
+                value="Sin reclamar",
+                inline=True
+            )
+
+
+            embed.set_footer(
+                text="InfernMC • Sistema de tickets"
+            )
+
+
+            await canal.send(
+
+                content=interaction.user.mention,
+
+                embed=embed,
+
+                view=TicketControlView()
+
+            )
+
+
+            await interaction.followup.send(
+
+                f"Ticket creado correctamente: "
+                f"{canal.mention}",
+
+                ephemeral=True
+
+            )
+
+
+            print(
+                f"[TICKETS] Ticket creado: {canal.name}"
+            )
+
+
+        except Exception as error:
+
+            print(
+                "======================================"
+            )
+
+            print(
+                "[TICKETS] ERROR CREANDO TICKET"
+            )
+
+            print(
+                repr(error)
+            )
+
+            print(
+                "======================================"
+            )
+
+
+            try:
+
+                if interaction.response.is_done():
+
+                    await interaction.followup.send(
+
+                        "Ocurrió un error creando el ticket. "
+                        "Revisa los logs de Railway.",
+
+                        ephemeral=True
+
+                    )
+
+                else:
+
+                    await interaction.response.send_message(
+
+                        "Ocurrió un error creando el ticket. "
+                        "Revisa los logs de Railway.",
+
+                        ephemeral=True
+
+                    )
+
+
+            except Exception as response_error:
+
+                print(
+                    "[TICKETS] ERROR RESPONDIENDO:"
+                )
+
+                print(
+                    repr(response_error)
+                )
+
+
+# =========================================================
+# SELECTOR DE TICKETS
+# =========================================================
+
+class TicketSelect(discord.ui.Select):
+
+    def __init__(self):
+
+        opciones = [
+
+            discord.SelectOption(
+                label="Ayuda General",
+                description="Necesitas ayuda con un problema general.",
+                emoji="🎲",
+                value="general"
+            ),
+
+            discord.SelectOption(
+                label="Bugs",
+                description="Reporta errores o problemas del servidor.",
+                emoji="🎗️",
+                value="bugs"
+            ),
+
+            discord.SelectOption(
+                label="Postulaciones",
+                description="Postúlate para formar parte del Staff-Team.",
+                emoji=discord.PartialEmoji(
+                    name=POSTULACIONES_EMOJI_NAME,
+                    id=POSTULACIONES_EMOJI_ID
+                ),
+                value="postulaciones"
+            ),
+
+            discord.SelectOption(
+                label="Tienda",
+                description="Problemas relacionados con la tienda.",
+                emoji="📯",
+                value="tienda"
+            ),
+
+            discord.SelectOption(
+                label="Sanciones",
+                description="Apela una sanción.",
+                emoji="🗂️",
+                value="sanciones"
+            )
+
+        ]
+
+
+        super().__init__(
+
+            placeholder="Selecciona una categoría...",
+
+            min_values=1,
+
+            max_values=1,
+
+            options=opciones,
+
+            custom_id="infernmc_ticket_category_select"
+
+        )
+
+
+    async def callback(
+        self,
+        interaction: discord.Interaction
+    ):
+
+        try:
+
+            categoria = self.values[0]
+
+            print(
+                f"[TICKETS] {interaction.user} "
+                f"seleccionó: {categoria}"
+            )
+
+
+            if categoria not in CATEGORIAS:
+
+                await interaction.response.send_message(
+
+                    "Categoría inválida.",
+
+                    ephemeral=True
+
+                )
+
+                return
+
+
+            await interaction.response.send_modal(
+
+                TicketModal(categoria)
+
+            )
+
+
+            print(
+                f"[TICKETS] Modal enviado a "
+                f"{interaction.user}"
+            )
+
+
+        except Exception as error:
+
+            print(
+                "[TICKETS] ERROR EN SELECT:"
+            )
+
+            print(
+                repr(error)
+            )
+
+
+            try:
+
+                if not interaction.response.is_done():
+
+                    await interaction.response.send_message(
+
+                        "Ocurrió un error al abrir "
+                        "el formulario. Revisa los logs "
+                        "de Railway.",
+
+                        ephemeral=True
+
+                    )
+
+
+            except Exception as error2:
+
+                print(
+                    "[TICKETS] ERROR RESPONDIENDO:"
+                )
+
+                print(
+                    repr(error2)
+                )
+
+
+# =========================================================
+# PANEL DE TICKETS
+# =========================================================
+
+class TicketPanelView(discord.ui.View):
 
     def __init__(self):
 
@@ -691,354 +838,387 @@ class TicketPanelView(View):
         )
 
 
-# ============================================================
-# BOTONES DE TICKET
-# ============================================================
+# =========================================================
+# RECLAMAR TICKET
+# =========================================================
 
-class ClaimButton(Button):
+class ClaimButton(
+    discord.ui.Button
+):
 
     def __init__(self):
 
         super().__init__(
             label="Reclamar",
-            emoji="🙋",
             style=discord.ButtonStyle.primary,
+            emoji="📌",
             custom_id="infernmc_ticket_claim"
         )
 
-    async def callback(self, interaction):
 
-        if not es_admin(interaction.user):
+    async def callback(
+        self,
+        interaction: discord.Interaction
+    ):
 
-            await interaction.response.send_message(
-                "Solo el Staff autorizado puede reclamar tickets.",
-                ephemeral=True
+        try:
+
+            if not es_admin(
+                interaction.user
+            ):
+
+                await interaction.response.send_message(
+
+                    "Solo el Staff puede reclamar tickets.",
+
+                    ephemeral=True
+
+                )
+
+                return
+
+
+            channel = interaction.channel
+
+
+            if channel is None:
+
+                return
+
+
+            owner, staff, categoria = (
+                obtener_datos_ticket(channel)
             )
 
-            return
 
-        datos = obtener_datos_ticket(
-            interaction.channel
-        )
+            if staff and staff != "Sin reclamar":
 
-        staff_actual = datos.get(
-            "staff",
-            "Sin reclamar"
-        )
+                await interaction.response.send_message(
 
-        if staff_actual != "Sin reclamar":
+                    "Este ticket ya fue reclamado.",
 
-            await interaction.response.send_message(
-                f"Este ticket ya fue reclamado por "
-                f"<@{staff_actual}>.",
-                ephemeral=True
+                    ephemeral=True
+
+                )
+
+                return
+
+
+            nuevo_topic = (
+
+                f"Owner:{owner}"
+                f"|Staff:{interaction.user.id}"
+                f"|Categoria:{categoria}"
+
             )
 
-            return
 
-        topic = interaction.channel.topic or ""
-
-        nuevo_topic = re.sub(
-            r"Staff:[^|]+",
-            f"Staff:{interaction.user.id}",
-            topic
-        )
-
-        await interaction.channel.edit(
-            topic=nuevo_topic
-        )
-
-        sumar_puntos(
-            interaction.user.id,
-            3,
-            "claim"
-        )
-
-        await interaction.response.send_message(
-            f"{interaction.user.mention} reclamó este ticket.\n\n"
-            "**+3 puntos**"
-        )
-
-        await actualizar_top_staff()
+            await channel.edit(
+                topic=nuevo_topic
+            )
 
 
-class CloseButton(Button):
+            sumar_puntos(
+                interaction.user.id,
+                3,
+                "ticket"
+            )
+
+
+            embed = discord.Embed(
+
+                title="📌 Ticket reclamado",
+
+                description=(
+
+                    f"El ticket fue reclamado por "
+                    f"{interaction.user.mention}.\n\n"
+                    "**+3 puntos para el Staff.**"
+
+                ),
+
+                color=discord.Color.blue()
+
+            )
+
+
+            await interaction.response.send_message(
+                embed=embed
+            )
+
+
+            await actualizar_top_staff(
+                interaction.guild
+            )
+
+
+        except Exception as error:
+
+            print(
+                "[STAFF] ERROR RECLAMANDO:"
+            )
+
+            print(
+                repr(error)
+            )
+
+
+# =========================================================
+# CERRAR TICKET
+# =========================================================
+
+class CloseButton(
+    discord.ui.Button
+):
 
     def __init__(self):
 
         super().__init__(
             label="Cerrar",
-            emoji="🔒",
             style=discord.ButtonStyle.danger,
+            emoji="🔒",
             custom_id="infernmc_ticket_close"
         )
 
-    async def callback(self, interaction):
 
-        if not es_admin(interaction.user):
+    async def callback(
+        self,
+        interaction: discord.Interaction
+    ):
+
+        try:
+
+            if not es_admin(
+                interaction.user
+            ):
+
+                await interaction.response.send_message(
+
+                    "Solo el Staff puede cerrar tickets.",
+
+                    ephemeral=True
+
+                )
+
+                return
+
+
+            channel = interaction.channel
+
+
+            if channel is None:
+
+                return
+
 
             await interaction.response.send_message(
-                "Solo el Staff autorizado puede cerrar tickets.",
+
+                "Cerrando ticket y generando transcript...",
+
                 ephemeral=True
+
             )
 
-            return
 
-        await interaction.response.defer()
-
-        canal = interaction.channel
-
-        datos = obtener_datos_ticket(canal)
-
-        owner_id = datos.get("owner")
-        staff_id = datos.get("staff")
-
-        if not owner_id:
-
-            await interaction.followup.send(
-                "No se encontró el propietario del ticket."
+            owner, staff, categoria = (
+                obtener_datos_ticket(channel)
             )
 
-            return
 
-        # ====================================================
-        # TRANSCRIPT
-        # ====================================================
+            # Transcript
 
-        transcript_text, mensajes = await crear_transcript(
-            canal
-        )
-
-        transcript_channel = canal.guild.get_channel(
-            TRANSCRIPTS_CHANNEL_ID
-        )
-
-        if transcript_channel:
-
-            archivo = discord.File(
-                io.BytesIO(
-                    transcript_text.encode("utf-8")
-                ),
-                filename=f"{canal.name}.txt"
+            archivo = await crear_transcript(
+                channel
             )
 
-            try:
 
-                await transcript_channel.send(
+            # Enviar transcript
+
+            transcripts = (
+                interaction.guild.get_channel(
+                    TRANSCRIPTS_CHANNEL_ID
+                )
+            )
+
+
+            if transcripts:
+
+                await transcripts.send(
+
                     content=(
-                        f"**Transcript:** `{canal.name}`\n"
-                        f"**Cerrado por:** "
-                        f"{interaction.user.mention}"
+                        f"Transcript de `{channel.name}`"
                     ),
-                    file=archivo
+
+                    file=discord.File(
+                        archivo
+                    )
+
                 )
 
-            except Exception as e:
 
-                print(
-                    "ERROR ENVIANDO TRANSCRIPT:",
-                    repr(e)
-                )
+            # IA local
 
-        # ====================================================
-        # IA PROPIA
-        # ====================================================
+            if (
+                staff
+                and staff != "Sin reclamar"
+            ):
 
-        ai_score = 0
+                try:
 
-        ai_reason = (
-            "El ticket no fue reclamado por un miembro del staff."
-        )
+                    staff_id = int(staff)
 
-        if staff_id and staff_id != "Sin reclamar":
+                    score, razon = (
+                        await evaluar_ticket_local(
+                            channel
+                        )
+                    )
 
-            try:
 
-                staff_id_int = int(staff_id)
+                    cursor.execute(
 
-                resultado = evaluar_ticket_local(
-                    mensajes,
-                    staff_id_int
-                )
+                        """
+                        INSERT INTO ai_reviews (
+                            staff_id,
+                            ticket,
+                            score,
+                            reason,
+                            created_at
+                        )
+                        VALUES (?, ?, ?, ?, ?)
+                        """,
 
-                ai_score = resultado["score"]
+                        (
+                            staff_id,
+                            channel.name,
+                            score,
+                            razon,
+                            datetime.now(
+                                timezone.utc
+                            ).isoformat()
+                        )
 
-                ai_reason = resultado["reason"]
+                    )
 
-                sumar_puntos(
-                    staff_id_int,
-                    ai_score,
-                    "ai"
-                )
 
-                cursor.execute(
-                    """
-                    INSERT INTO ai_reviews
-                    (
+                    db.commit()
+
+
+                    sumar_puntos(
                         staff_id,
-                        ticket,
                         score,
-                        reason,
-                        created_at
+                        "ai"
                     )
 
-                    VALUES (?, ?, ?, ?, ?)
-                    """,
-                    (
-                        staff_id_int,
-                        canal.name,
-                        ai_score,
-                        ai_reason,
-                        datetime.now(
-                            timezone.utc
-                        ).isoformat()
+
+                    print(
+                        f"[IA] {channel.name}: "
+                        f"{score}/10"
                     )
-                )
 
-                db.commit()
 
-            except Exception as e:
+                except Exception as ai_error:
 
-                print(
-                    "ERROR IA:",
-                    repr(e)
-                )
+                    print(
+                        "[IA] ERROR:"
+                    )
 
-        # ====================================================
-        # VALORACIÓN
-        # ====================================================
+                    print(
+                        repr(ai_error)
+                    )
 
-        try:
 
-            owner = await bot.fetch_user(
-                int(owner_id)
+            # Rating
+
+            if owner:
+
+                try:
+
+                    owner_id = int(owner)
+
+                    usuario = interaction.guild.get_member(
+                        owner_id
+                    )
+
+
+                    if usuario:
+
+                        await usuario.send(
+
+                            embed=discord.Embed(
+
+                                title="⭐ Valora tu ticket",
+
+                                description=(
+
+                                    "Tu ticket en InfernMC "
+                                    "ha sido cerrado.\n\n"
+                                    "Selecciona cuántas estrellas "
+                                    "quieres darle al Staff que "
+                                    "atendió tu ticket."
+
+                                ),
+
+                                color=discord.Color.gold()
+
+                            ),
+
+                            view=RatingView(
+
+                                staff_id=(
+                                    int(staff)
+                                    if staff
+                                    and staff != "Sin reclamar"
+                                    else None
+                                ),
+
+                                ticket_name=channel.name
+
+                            )
+
+                        )
+
+                except Exception as dm_error:
+
+                    print(
+                        "[RATING] No se pudo enviar DM:"
+                    )
+
+                    print(
+                        repr(dm_error)
+                    )
+
+
+            await actualizar_top_staff(
+                interaction.guild
             )
 
-            rating_embed = discord.Embed(
-                title="⭐ Valora la atención recibida",
-                description=(
-                    f"Tu ticket `{canal.name}` fue cerrado.\n\n"
-                    "Selecciona una valoración del **1 al 5**.\n\n"
-                    "Tu valoración influirá en el ranking del Staff."
-                ),
-                color=discord.Color.gold()
-            )
 
-            await owner.send(
-                embed=rating_embed,
-                view=RatingView(
-                    owner_id=int(owner_id),
-                    staff_id=(
-                        int(staff_id)
-                        if staff_id and staff_id != "Sin reclamar"
-                        else None
-                    ),
-                    ticket_name=canal.name
-                )
-            )
+            await asyncio.sleep(3)
 
-        except Exception as e:
 
-            print(
-                "ERROR ENVIANDO VALORACIÓN:",
-                repr(e)
-            )
-
-        # ====================================================
-        # RESULTADO IA
-        # ====================================================
-
-        valoraciones = canal.guild.get_channel(
-            VALORACIONES_CHANNEL_ID
-        )
-
-        if valoraciones:
-
-            embed = discord.Embed(
-                title="🤖 Evaluación automática",
-                color=discord.Color.red()
-            )
-
-            embed.add_field(
-                name="Ticket",
-                value=canal.name,
-                inline=True
-            )
-
-            if staff_id and staff_id != "Sin reclamar":
-
-                embed.add_field(
-                    name="Staff",
-                    value=f"<@{staff_id}>",
-                    inline=True
-                )
-
-                embed.add_field(
-                    name="Puntuación",
-                    value=f"**{ai_score}/10**",
-                    inline=True
-                )
-
-                embed.add_field(
-                    name="Análisis",
-                    value=ai_reason[:1024],
-                    inline=False
-                )
-
-            else:
-
-                embed.add_field(
-                    name="Resultado",
-                    value=(
-                        "No hubo un Staff reclamando el ticket."
-                    ),
-                    inline=False
-                )
-
-            embed.set_footer(
-                text="InfernMC • IA automática"
-            )
-
-            try:
-
-                await valoraciones.send(
-                    embed=embed
-                )
-
-            except Exception as e:
-
-                print(
-                    "ERROR ENVIANDO EVALUACIÓN:",
-                    repr(e)
-                )
-
-        await actualizar_top_staff()
-
-        # ====================================================
-        # CERRAR
-        # ====================================================
-
-        await interaction.followup.send(
-            "Ticket cerrado. El canal será eliminado en 3 segundos."
-        )
-
-        await asyncio.sleep(3)
-
-        try:
-
-            await canal.delete(
+            await channel.delete(
                 reason="Ticket cerrado"
             )
 
-        except Exception as e:
+
+        except Exception as error:
 
             print(
-                "ERROR ELIMINANDO TICKET:",
-                repr(e)
+                "[TICKETS] ERROR CERRANDO:"
+            )
+
+            print(
+                repr(error)
             )
 
 
-class TicketControlView(View):
+# =========================================================
+# VISTA CONTROL TICKET
+# =========================================================
+
+class TicketControlView(
+    discord.ui.View
+):
 
     def __init__(self):
 
@@ -1055,610 +1235,372 @@ class TicketControlView(View):
         )
 
 
-# ============================================================
+# =========================================================
 # TRANSCRIPT
-# ============================================================
+# =========================================================
 
-async def crear_transcript(channel):
+async def crear_transcript(
+    channel
+):
 
-    mensajes_db = []
+    nombre = (
+        f"transcript-{channel.name}.txt"
+    )
+
+    ruta = os.path.join(
+        "/tmp",
+        nombre
+    )
+
+
+    mensajes = []
+
 
     async for mensaje in channel.history(
         limit=None,
         oldest_first=True
     ):
 
+        fecha = mensaje.created_at.strftime(
+            "%Y-%m-%d %H:%M:%S"
+        )
+
+
         contenido = mensaje.content
+
 
         if not contenido:
 
             contenido = "[Sin contenido]"
 
-        attachments = []
+
+        mensajes.append(
+
+            f"[{fecha}] "
+            f"{mensaje.author} "
+            f"(ID: {mensaje.author.id})\n"
+            f"{contenido}\n"
+
+        )
+
 
         for archivo in mensaje.attachments:
 
-            attachments.append(
-                archivo.url
+            mensajes.append(
+                f"Adjunto: {archivo.url}\n"
             )
 
-        mensajes_db.append({
 
-            "author":
-                mensaje.author.name,
-
-            "author_id":
-                mensaje.author.id,
-
-            "content":
-                contenido,
-
-            "created_at":
-                mensaje.created_at,
-
-            "attachments":
-                attachments
-        })
-
-    lineas = []
-
-    lineas.append(
-        f"TRANSCRIPT - {channel.name}"
-    )
-
-    lineas.append(
-        f"CANAL ID: {channel.id}"
-    )
-
-    lineas.append(
-        "GENERADO: "
-        + datetime.now(
-            timezone.utc
-        ).strftime(
-            "%Y-%m-%d %H:%M:%S UTC"
-        )
-    )
-
-    lineas.append(
-        "=" * 70
-    )
-
-    for mensaje in mensajes_db:
-
-        fecha = mensaje["created_at"].strftime(
-            "%Y-%m-%d %H:%M:%S"
+        mensajes.append(
+            "\n"
         )
 
-        lineas.append(
-            f"[{fecha}] "
-            f"{mensaje['author']} "
-            f"({mensaje['author_id']}):"
+
+    with open(
+        ruta,
+        "w",
+        encoding="utf-8"
+    ) as archivo:
+
+        archivo.write(
+            f"INFERNMC TRANSCRIPT\n"
+            f"Canal: {channel.name}\n"
+            f"ID: {channel.id}\n"
+            f"Generado: "
+            f"{datetime.now(timezone.utc).isoformat()}\n"
+            f"{'=' * 60}\n\n"
         )
 
-        lineas.append(
-            mensaje["content"]
+
+        archivo.writelines(
+            mensajes
         )
 
-        if mensaje["attachments"]:
 
-            lineas.append(
-                "ARCHIVOS:"
-            )
-
-            for url in mensaje["attachments"]:
-
-                lineas.append(
-                    url
-                )
-
-        lineas.append(
-            "-" * 70
-        )
-
-    return (
-        "\n".join(lineas),
-        mensajes_db
-    )
+    return ruta
 
 
-# ============================================================
-# IA PROPIA
-# ============================================================
+# =========================================================
+# IA LOCAL GRATUITA
+# =========================================================
 
-def limpiar_texto(texto):
-
-    texto = texto.lower()
-
-    texto = re.sub(
-        r"https?://\S+",
-        " ",
-        texto
-    )
-
-    texto = re.sub(
-        r"<a?:\w+:\d+>",
-        " ",
-        texto
-    )
-
-    texto = re.sub(
-        r"\s+",
-        " ",
-        texto
-    )
-
-    return texto.strip()
-
-
-def contar_palabras(texto, palabras):
-
-    texto = limpiar_texto(texto)
-
-    cantidad = 0
-
-    for palabra in palabras:
-
-        if palabra in texto:
-
-            cantidad += 1
-
-    return cantidad
-
-
-def evaluar_ticket_local(
-    mensajes,
-    staff_id
+async def evaluar_ticket_local(
+    channel
 ):
 
-    """
-    IA LOCAL DE INFERNMC.
+    mensajes = []
 
-    No utiliza APIs.
 
-    Devuelve:
-        score = 0 - 10
-        reason = explicación
-    """
+    async for mensaje in channel.history(
+        limit=200,
+        oldest_first=True
+    ):
+
+        if mensaje.author.bot:
+            continue
+
+        if mensaje.content:
+
+            mensajes.append(
+                mensaje.content.lower()
+            )
+
 
     if not mensajes:
 
-        return {
-            "score": 0,
-            "reason":
-                "No se encontraron mensajes."
-        }
+        return 0, "No hubo suficiente información."
 
-    staff_messages = []
-    user_messages = []
 
-    for mensaje in mensajes:
-
-        if mensaje["author_id"] == staff_id:
-
-            staff_messages.append(
-                mensaje
-            )
-
-        else:
-
-            user_messages.append(
-                mensaje
-            )
-
-    if not staff_messages:
-
-        return {
-            "score": 0,
-            "reason":
-                "No hubo mensajes del Staff."
-        }
-
-    texto_staff = " ".join(
-        mensaje["content"]
-        for mensaje in staff_messages
+    texto = " ".join(
+        mensajes
     )
 
-    texto_usuario = " ".join(
-        mensaje["content"]
-        for mensaje in user_messages
-    )
 
-    staff_limpio = limpiar_texto(
-        texto_staff
-    )
-
-    usuario_limpio = limpiar_texto(
-        texto_usuario
-    )
-
-    score = 5
-
+    score = 0
     razones = []
 
-    # --------------------------------------------------------
-    # PARTICIPACIÓN
-    # --------------------------------------------------------
+
+    # Participación
 
     cantidad = len(
-        staff_messages
+        mensajes
     )
 
-    if cantidad >= 2:
+
+    if cantidad >= 10:
+
+        score += 2
+        razones.append(
+            "Buena participación."
+        )
+
+    elif cantidad >= 5:
 
         score += 1
-
         razones.append(
-            "hubo participación suficiente"
+            "Participación aceptable."
         )
 
-    if cantidad >= 5:
 
-        score += 1
+    # Mensajes cortos
 
-        razones.append(
-            "hubo una participación alta"
-        )
+    cortos = sum(
+        1
+        for m in mensajes
+        if len(m.split()) <= 3
+    )
 
-    # --------------------------------------------------------
-    # RESPUESTAS CORTAS
-    # --------------------------------------------------------
 
-    cortos = 0
-
-    for mensaje in staff_messages:
-
-        contenido = limpiar_texto(
-            mensaje["content"]
-        )
-
-        if len(contenido) <= 4:
-
-            cortos += 1
-
-    if cortos >= 3:
+    if cortos > cantidad * 0.5:
 
         score -= 2
 
         razones.append(
-            "hubo varias respuestas demasiado cortas"
+            "Demasiadas respuestas cortas."
         )
 
-    # --------------------------------------------------------
-    # AYUDA
-    # --------------------------------------------------------
+
+    # Ayuda
 
     palabras_ayuda = [
-
         "ayuda",
-        "puedes",
-        "puedo",
-        "vamos",
-        "revisar",
-        "revisaré",
-        "revisamos",
-        "solucion",
         "solución",
-        "resolver",
-        "resuelto",
-        "problema",
-        "explicar",
+        "solucion",
+        "puedes",
+        "debes",
+        "tienes que",
+        "revisa",
         "explico",
-        "comprobar",
-        "verificar",
-        "verifico",
-        "revisando"
-
-    ]
-
-    ayuda = contar_palabras(
-        staff_limpio,
-        palabras_ayuda
-    )
-
-    if ayuda >= 2:
-
-        score += 1
-
-        razones.append(
-            "se detectaron respuestas orientadas a ayudar"
-        )
-
-    if ayuda >= 5:
-
-        score += 1
-
-        razones.append(
-            "hubo varias acciones de solución"
-        )
-
-    # --------------------------------------------------------
-    # RESOLUCIÓN
-    # --------------------------------------------------------
-
-    resolucion = [
-
-        "solucionado",
-        "solucioné",
-        "solucione",
+        "explicarte",
         "resuelto",
-        "resolví",
-        "resolvi",
-        "arreglado",
-        "arreglé",
-        "arregle",
-        "hecho",
-        "listo",
-        "corregido",
-        "funciona",
-        "funcionando",
-        "prueba ahora"
-
+        "arreglado"
     ]
 
-    cantidad_resolucion = contar_palabras(
-        staff_limpio,
-        resolucion
+
+    ayuda = sum(
+        1
+        for palabra in palabras_ayuda
+        if palabra in texto
     )
 
-    if cantidad_resolucion >= 1:
+
+    if ayuda >= 3:
+
+        score += 2
+
+        razones.append(
+            "El Staff proporcionó ayuda."
+        )
+
+    elif ayuda >= 1:
 
         score += 1
 
-        razones.append(
-            "hay señales de resolución"
-        )
 
-    # --------------------------------------------------------
-    # EXPLICACIÓN
-    # --------------------------------------------------------
+    # Trato
 
-    explicacion = [
-
-        "porque",
-        "debido",
-        "significa",
-        "funciona",
-        "motivo",
-        "razón",
-        "razon",
-        "explicación",
-        "explicacion",
-        "para que",
-        "esto ocurre"
-
-    ]
-
-    cantidad_explicacion = contar_palabras(
-        staff_limpio,
-        explicacion
-    )
-
-    if cantidad_explicacion >= 2:
-
-        score += 1
-
-        razones.append(
-            "el Staff proporcionó explicaciones"
-        )
-
-    # --------------------------------------------------------
-    # BUEN TRATO
-    # --------------------------------------------------------
-
-    buen_trato = [
-
-        "hola",
-        "buenas",
+    buenas = [
         "gracias",
         "por favor",
         "disculpa",
-        "disculpe",
-        "entiendo",
+        "perdón",
+        "bienvenido",
         "claro",
         "perfecto",
-        "con gusto",
-        "de nada"
-
+        "con gusto"
     ]
 
-    cantidad_trato = contar_palabras(
-        staff_limpio,
-        buen_trato
+
+    buenas_count = sum(
+        1
+        for palabra in buenas
+        if palabra in texto
     )
 
-    if cantidad_trato >= 2:
+
+    if buenas_count >= 2:
 
         score += 1
 
         razones.append(
-            "se detectó un trato adecuado"
+            "Buen trato."
         )
 
-    # --------------------------------------------------------
-    # CIERRE
-    # --------------------------------------------------------
 
-    cierres = [
-
-        "alguna otra duda",
-        "alguna otra pregunta",
-        "puedo ayudarte",
-        "necesitas algo más",
-        "necesitas algo mas",
-        "si necesitas",
-        "que tengas",
-        "buen día",
-        "buen dia"
-
-    ]
-
-    if contar_palabras(
-        staff_limpio,
-        cierres
-    ) >= 1:
-
-        score += 1
-
-        razones.append(
-            "el cierre fue adecuado"
-        )
-
-    # --------------------------------------------------------
-    # MAL TRATO
-    # --------------------------------------------------------
-
-    negativas = [
-
-        "cállate",
-        "callate",
+    malas = [
         "idiota",
+        "estupido",
+        "estúpido",
         "imbecil",
         "imbécil",
-        "estúpido",
-        "estupido",
-        "no me importa",
-        "problema tuyo",
-        "vete",
-        "largate",
-        "lárgate"
-
+        "cállate",
+        "callate",
+        "no sirves",
+        "mierda"
     ]
 
-    if contar_palabras(
-        staff_limpio,
-        negativas
-    ) >= 1:
+
+    malas_count = sum(
+        1
+        for palabra in malas
+        if palabra in texto
+    )
+
+
+    if malas_count > 0:
 
         score -= 3
 
         razones.append(
-            "se detectaron expresiones poco profesionales"
+            "Se detectó lenguaje inapropiado."
         )
 
-    # --------------------------------------------------------
-    # REPETICIONES
-    # --------------------------------------------------------
 
-    contenidos = []
+    # Resolución
 
-    for mensaje in staff_messages:
+    resolucion = [
+        "resuelto",
+        "solucionado",
+        "solucioné",
+        "solucione",
+        "arreglado",
+        "ya está",
+        "ya esta",
+        "funciona"
+    ]
 
-        texto = limpiar_texto(
-            mensaje["content"]
-        )
 
-        if len(texto) > 8:
-
-            contenidos.append(
-                texto
-            )
-
-    repetidos = 0
-
-    for i in range(
-        len(contenidos)
+    if any(
+        palabra in texto
+        for palabra in resolucion
     ):
 
-        for j in range(
-            i + 1,
-            len(contenidos)
-        ):
-
-            if contenidos[i] == contenidos[j]:
-
-                repetidos += 1
-
-    if repetidos >= 2:
-
-        score -= 2
+        score += 2
 
         razones.append(
-            "se detectaron respuestas repetitivas"
+            "El problema parece haber sido resuelto."
         )
 
-    # --------------------------------------------------------
-    # CANTIDAD DE INFORMACIÓN
-    # --------------------------------------------------------
 
-    cantidad_palabras = len(
-        staff_limpio.split()
+    # Explicación
+
+    largos = sum(
+        1
+        for m in mensajes
+        if len(m.split()) >= 15
     )
 
-    if cantidad_palabras >= 40:
+
+    if largos >= 2:
 
         score += 1
 
         razones.append(
-            "se proporcionó suficiente información"
+            "Se proporcionaron explicaciones."
         )
 
-    if cantidad_palabras <= 8:
+
+    # Repetición
+
+    repetidos = (
+        len(mensajes)
+        - len(set(mensajes))
+    )
+
+
+    if repetidos >= 3:
 
         score -= 1
 
         razones.append(
-            "la información fue limitada"
+            "Se detectaron respuestas repetitivas."
         )
 
-    # --------------------------------------------------------
-    # USUARIO CONFORME
-    # --------------------------------------------------------
 
-    conformidad = [
+    # Satisfacción
 
-        "gracias",
+    positivos = [
+        "gracias por la ayuda",
         "muchas gracias",
         "perfecto",
-        "funciona",
-        "ya funciona",
-        "listo",
-        "solucionado",
-        "todo bien"
-
+        "excelente",
+        "funcionó",
+        "funciono"
     ]
 
-    if contar_palabras(
-        usuario_limpio,
-        conformidad
-    ) >= 1:
+
+    if any(
+        palabra in texto
+        for palabra in positivos
+    ):
 
         score += 1
 
         razones.append(
-            "el usuario dejó señales de conformidad"
+            "El usuario mostró satisfacción."
         )
 
-    # --------------------------------------------------------
-    # USUARIO INCONFORME
-    # --------------------------------------------------------
 
-    inconformidad = [
-
-        "no funciona",
-        "sigue sin funcionar",
-        "no sirve",
-        "no me ayudaste",
+    negativos = [
+        "no ayudó",
+        "no ayudo",
         "sigo igual",
-        "nadie me ayuda",
-        "llevo mucho esperando",
-        "esto no sirve"
-
+        "no funciona",
+        "nadie me ayuda"
     ]
 
-    if contar_palabras(
-        usuario_limpio,
-        inconformidad
-    ) >= 1:
 
-        score -= 2
+    if any(
+        palabra in texto
+        for palabra in negativos
+    ):
+
+        score -= 1
 
         razones.append(
-            "el usuario dejó señales de inconformidad"
+            "Se detectó insatisfacción."
         )
 
-    # --------------------------------------------------------
-    # LIMITAR
-    # --------------------------------------------------------
 
     score = max(
         0,
@@ -1668,238 +1610,321 @@ def evaluar_ticket_local(
         )
     )
 
+
     if not razones:
 
         razones.append(
-            "evaluación basada en la actividad del ticket"
+            "Interacción normal."
         )
 
-    razones = list(
-        dict.fromkeys(
-            razones
-        )
+
+    razon = " ".join(
+        razones
     )
 
-    return {
 
-        "score":
-            score,
-
-        "reason":
-            "; ".join(
-                razones
-            )
-    }
+    return score, razon
 
 
-# ============================================================
-# VALORACIONES
-# ============================================================
+# =========================================================
+# RATING
+# =========================================================
 
-class RatingButton(Button):
+class RatingButton(
+    discord.ui.Button
+):
 
     def __init__(
         self,
-        stars,
-        owner_id,
+        estrellas,
         staff_id,
         ticket_name
     ):
 
-        estilos = {
+        if estrellas <= 2:
 
-            1:
-                discord.ButtonStyle.danger,
+            estilo = discord.ButtonStyle.danger
 
-            2:
-                discord.ButtonStyle.danger,
+        elif estrellas == 3:
 
-            3:
-                discord.ButtonStyle.primary,
+            estilo = discord.ButtonStyle.primary
 
-            4:
-                discord.ButtonStyle.success,
+        else:
 
-            5:
-                discord.ButtonStyle.success
-        }
+            estilo = discord.ButtonStyle.success
+
 
         super().__init__(
-            label=f"{stars} ⭐",
-            style=estilos[stars],
-            custom_id=f"infernmc_rating_{stars}_{ticket_name}"
+
+            label=f"{estrellas} ⭐",
+
+            style=estilo,
+
+            custom_id=(
+                f"infernmc_rating_"
+                f"{estrellas}_"
+                f"{ticket_name}"
+            )
+
         )
 
-        self.stars = stars
-        self.owner_id = owner_id
+
+        self.estrellas = estrellas
         self.staff_id = staff_id
         self.ticket_name = ticket_name
 
-    async def callback(self, interaction):
 
-        if interaction.user.id != self.owner_id:
+    async def callback(
+        self,
+        interaction: discord.Interaction
+    ):
 
-            await interaction.response.send_message(
-                "Esta valoración no te pertenece.",
-                ephemeral=True
-            )
+        try:
 
-            return
+            if self.staff_id is None:
 
-        cursor.execute(
-            """
-            SELECT id
+                await interaction.response.send_message(
 
-            FROM ratings
+                    "El ticket no tenía un Staff asignado.",
 
-            WHERE user_id = ?
-            AND ticket = ?
-            """,
-            (
-                self.owner_id,
-                self.ticket_name
-            )
-        )
+                    ephemeral=True
 
-        if cursor.fetchone():
-
-            await interaction.response.send_message(
-                "Ya has valorado este ticket.",
-                ephemeral=True
-            )
-
-            return
-
-        cursor.execute(
-            """
-            INSERT INTO ratings
-            (
-                staff_id,
-                user_id,
-                stars,
-                ticket,
-                created_at
-            )
-
-            VALUES (?, ?, ?, ?, ?)
-            """,
-            (
-                self.staff_id,
-                self.owner_id,
-                self.stars,
-                self.ticket_name,
-                datetime.now(
-                    timezone.utc
-                ).isoformat()
-            )
-        )
-
-        db.commit()
-
-        if self.staff_id:
-
-            sumar_puntos(
-                self.staff_id,
-                self.stars,
-                "rating"
-            )
-
-        canal_valoraciones = bot.get_channel(
-            VALORACIONES_CHANNEL_ID
-        )
-
-        if canal_valoraciones:
-
-            embed = discord.Embed(
-                title="⭐ Nueva valoración",
-                color=discord.Color.gold()
-            )
-
-            embed.add_field(
-                name="Usuario",
-                value=f"<@{self.owner_id}>",
-                inline=True
-            )
-
-            if self.staff_id:
-
-                embed.add_field(
-                    name="Staff",
-                    value=f"<@{self.staff_id}>",
-                    inline=True
                 )
 
-            embed.add_field(
-                name="Valoración",
-                value="⭐" * self.stars,
-                inline=False
+                return
+
+
+            cursor.execute(
+
+                """
+                SELECT id
+                FROM ratings
+                WHERE user_id = ?
+                AND ticket = ?
+                """,
+
+                (
+                    interaction.user.id,
+                    self.ticket_name
+                )
+
             )
 
-            embed.add_field(
-                name="Puntos",
-                value=f"**+{self.stars}**",
-                inline=False
+
+            existente = cursor.fetchone()
+
+
+            if existente:
+
+                await interaction.response.send_message(
+
+                    "Ya has valorado este ticket.",
+
+                    ephemeral=True
+
+                )
+
+                return
+
+
+            cursor.execute(
+
+                """
+                INSERT INTO ratings (
+                    staff_id,
+                    user_id,
+                    stars,
+                    ticket,
+                    created_at
+                )
+                VALUES (?, ?, ?, ?, ?)
+                """,
+
+                (
+                    self.staff_id,
+                    interaction.user.id,
+                    self.estrellas,
+                    self.ticket_name,
+                    datetime.now(
+                        timezone.utc
+                    ).isoformat()
+                )
+
             )
 
-            embed.set_footer(
-                text=f"Ticket: {self.ticket_name}"
+
+            db.commit()
+
+
+            sumar_puntos(
+
+                self.staff_id,
+
+                self.estrellas,
+
+                "rating"
+
             )
 
-            await canal_valoraciones.send(
-                embed=embed
+
+            await interaction.response.send_message(
+
+                f"Gracias por tu valoración de "
+                f"{self.estrellas} estrellas.",
+
+                ephemeral=True
+
             )
 
-        await interaction.response.edit_message(
-            content=(
-                f"Valoración registrada: "
-                f"{'⭐' * self.stars}\n\n"
-                f"**+{self.stars} puntos** para el Staff."
-            ),
-            embed=None,
-            view=None
-        )
 
-        await actualizar_top_staff()
+            canal = (
+                interaction.client.get_channel(
+                    VALORACIONES_CHANNEL_ID
+                )
+            )
 
 
-class RatingView(View):
+            if canal:
+
+                embed = discord.Embed(
+
+                    title="⭐ Nueva valoración",
+
+                    color=discord.Color.gold()
+
+                )
+
+
+                embed.add_field(
+
+                    name="Usuario",
+
+                    value=interaction.user.mention,
+
+                    inline=True
+
+                )
+
+
+                embed.add_field(
+
+                    name="Staff",
+
+                    value=f"<@{self.staff_id}>",
+
+                    inline=True
+
+                )
+
+
+                embed.add_field(
+
+                    name="Valoración",
+
+                    value=(
+                        "⭐" * self.estrellas
+                    ),
+
+                    inline=False
+
+                )
+
+
+                embed.add_field(
+
+                    name="Puntos",
+
+                    value=f"+{self.estrellas}",
+
+                    inline=True
+
+                )
+
+
+                embed.set_footer(
+
+                    text="InfernMC • Valoraciones"
+
+                )
+
+
+                await canal.send(
+                    embed=embed
+                )
+
+
+            await actualizar_top_staff(
+                interaction.guild
+            )
+
+
+            for item in self.view.children:
+
+                item.disabled = True
+
+
+            await interaction.message.edit(
+                view=self.view
+            )
+
+
+        except Exception as error:
+
+            print(
+                "[RATING] ERROR:"
+            )
+
+            print(
+                repr(error)
+            )
+
+
+class RatingView(
+    discord.ui.View
+):
 
     def __init__(
         self,
-        owner_id,
         staff_id,
         ticket_name
     ):
 
-        # La valoración dura 24 horas
         super().__init__(
             timeout=86400
         )
 
-        for stars in range(
+
+        for estrellas in range(
             1,
             6
         ):
 
             self.add_item(
+
                 RatingButton(
-                    stars,
-                    owner_id,
+
+                    estrellas,
+
                     staff_id,
+
                     ticket_name
+
                 )
+
             )
 
 
-# ============================================================
+# =========================================================
 # TOP STAFF
-# ============================================================
+# =========================================================
 
 def obtener_top_staff():
 
     revisar_reset_semanal()
 
+
     cursor.execute(
+
         """
         SELECT
             user_id,
@@ -1907,246 +1932,305 @@ def obtener_top_staff():
             total_points,
             tickets_claimed,
             ratings_received,
-            ai_reviews,
             ai_points
-
         FROM staff
-
-        WHERE weekly_points > 0
-
-        ORDER BY
-            weekly_points DESC,
-            total_points DESC
-
+        ORDER BY weekly_points DESC
         LIMIT 10
         """
+
     )
+
 
     return cursor.fetchall()
 
 
-async def actualizar_top_staff():
+async def actualizar_top_staff(
+    guild
+):
+
+    revisar_reset_semanal()
+
 
     cursor.execute(
+
         """
         SELECT value
-
         FROM config
-
         WHERE key = 'top_channel'
         """
+
     )
 
-    channel_result = cursor.fetchone()
+
+    canal_resultado = cursor.fetchone()
+
 
     cursor.execute(
+
         """
         SELECT value
-
         FROM config
-
         WHERE key = 'top_message'
         """
+
     )
 
-    message_result = cursor.fetchone()
 
-    if not channel_result:
+    mensaje_resultado = cursor.fetchone()
+
+
+    if not canal_resultado or not mensaje_resultado:
+
         return
 
-    if not message_result:
+
+    canal = guild.get_channel(
+        int(canal_resultado[0])
+    )
+
+
+    if canal is None:
+
         return
+
 
     try:
 
-        channel = bot.get_channel(
-            int(channel_result[0])
+        mensaje = await canal.fetch_message(
+            int(mensaje_resultado[0])
         )
 
-        if channel is None:
-            return
+    except Exception:
 
-        message = await channel.fetch_message(
-            int(message_result[0])
+        return
+
+
+    top = obtener_top_staff()
+
+
+    embed = discord.Embed(
+
+        title="🏆 TOP 10 STAFF",
+
+        description=(
+
+            "Clasificación semanal del Staff.\n\n"
+
+            "**Sistema de puntos**\n"
+            "📌 Reclamar ticket → **+3**\n"
+            "⭐ Valoración → **+1 a +5**\n"
+            "🤖 Evaluación IA → **+0 a +10**\n\n"
+
+        ),
+
+        color=discord.Color.red()
+
+    )
+
+
+    if not top:
+
+        embed.add_field(
+
+            name="Ranking",
+
+            value="Todavía no hay Staff con puntos.",
+
+            inline=False
+
         )
 
-        top = obtener_top_staff()
+    else:
 
-        embed = discord.Embed(
-            title="🏆 TOP 10 STAFF",
-            description=(
-                "**Clasificación semanal**\n\n"
+        lineas = []
 
-                "El ranking se actualiza automáticamente.\n\n"
 
-                "**Sistema de puntos**\n"
-                "🎫 Ticket reclamado → **+3**\n"
-                "⭐ Valoración → **+1 a +5**\n"
-                "🤖 IA → **+0 a +10**"
+        for posicion, datos in enumerate(
+            top,
+            start=1
+        ):
+
+            (
+                user_id,
+                weekly,
+                total,
+                tickets,
+                ratings,
+                ai_points
+            ) = datos
+
+
+            miembro = guild.get_member(
+                user_id
+            )
+
+
+            nombre = (
+                miembro.mention
+                if miembro
+                else f"<@{user_id}>"
+            )
+
+
+            lineas.append(
+
+                f"**#{posicion}** {nombre} "
+                f"→ **{weekly} puntos**"
+
+            )
+
+
+        embed.add_field(
+
+            name="Ranking semanal",
+
+            value="\n".join(
+                lineas
             ),
-            color=discord.Color.red()
-        )
 
-        if not top:
+            inline=False
 
-            embed.add_field(
-                name="Ranking",
-                value=(
-                    "Todavía no hay puntos registrados."
-                ),
-                inline=False
-            )
-
-        else:
-
-            texto = ""
-
-            for posicion, datos in enumerate(
-                top,
-                start=1
-            ):
-
-                user_id = datos[0]
-                weekly = datos[1]
-                total = datos[2]
-                tickets = datos[3]
-                ratings = datos[4]
-                ai_points = datos[6]
-
-                miembro = channel.guild.get_member(
-                    user_id
-                )
-
-                if miembro:
-
-                    nombre = miembro.mention
-
-                else:
-
-                    nombre = f"<@{user_id}>"
-
-                texto += (
-                    f"**#{posicion} {nombre}**\n"
-                    f"└ Semanal: **{weekly}**\n"
-                    f"└ Total: **{total}**\n"
-                    f"└ Tickets: **{tickets}** | "
-                    f"Valoraciones: **{ratings}** | "
-                    f"IA: **{ai_points}**\n\n"
-                )
-
-            embed.add_field(
-                name="Clasificación",
-                value=texto[:1024],
-                inline=False
-            )
-
-        embed.set_footer(
-            text=(
-                f"InfernMC • Semana "
-                f"{semana_actual()}"
-            )
-        )
-
-        await message.edit(
-            embed=embed
-        )
-
-    except discord.NotFound:
-
-        print(
-            "El mensaje del Top Staff ya no existe."
-        )
-
-    except Exception as e:
-
-        print(
-            "ERROR ACTUALIZANDO TOP:",
-            repr(e)
         )
 
 
-# ============================================================
+    semana = semana_actual()
+
+
+    embed.set_footer(
+
+        text=(
+            f"InfernMC • Semana {semana}"
+        )
+
+    )
+
+
+    await mensaje.edit(
+        embed=embed
+    )
+
+
+# =========================================================
 # BIENVENIDA
-# ============================================================
+# =========================================================
 
-async def enviar_bienvenida(member):
+async def enviar_bienvenida(
+    member
+):
 
-    channel = bot.get_channel(
+    canal = bot.get_channel(
         WELCOME_CHANNEL_ID
     )
 
-    if channel is None:
+
+    if canal is None:
+
         return
 
+
     embed = discord.Embed(
+
         title="🔥 ¡Bienvenido/a a InfernMC!",
+
         description=(
+
             f"¡Bienvenido/a {member.mention}!\n\n"
-            "Esperamos que disfrutes de tu estancia "
-            "en **InfernMC**.\n\n"
-            "Recuerda leer las reglas, respetar a "
-            "los demás miembros y utilizar los tickets "
-            "si necesitas ayuda."
+
+            "Esperamos que disfrutes de InfernMC.\n"
+            "Recuerda leer las reglas, utilizar los "
+            "tickets cuando necesites ayuda y respetar "
+            "a toda la comunidad."
+
         ),
+
         color=discord.Color.red()
+
     )
+
 
     embed.set_thumbnail(
         url=member.display_avatar.url
     )
 
-    embed.add_field(
-        name="👤 Usuario",
-        value=member.mention,
-        inline=True
-    )
 
     embed.add_field(
+
+        name="👤 Usuario",
+
+        value=member.mention,
+
+        inline=True
+
+    )
+
+
+    embed.add_field(
+
         name="📊 Miembros",
+
         value=str(
             member.guild.member_count
         ),
+
         inline=True
+
     )
 
+
     embed.add_field(
+
         name="🆔 Cuenta",
+
         value=str(
             member.id
         ),
-        inline=True
+
+        inline=False
+
     )
+
 
     embed.set_footer(
-        text="InfernMC • Sistema de bienvenidas"
+
+        text=(
+            "InfernMC • Sistema de bienvenidas"
+        )
+
     )
 
-    await channel.send(
+
+    await canal.send(
         embed=embed
     )
 
 
 @bot.event
-async def on_member_join(member):
+async def on_member_join(
+    member
+):
 
     await enviar_bienvenida(
         member
     )
 
 
-# ============================================================
+# =========================================================
 # READY
-# ============================================================
+# =========================================================
 
 @bot.event
 async def on_ready():
 
     revisar_reset_semanal()
 
-    print("=" * 50)
 
     print(
-        f"Bot conectado: {bot.user}"
+        "======================================"
+    )
+
+    print(
+        f"InfernMC conectado como "
+        f"{bot.user}"
     )
 
     print(
@@ -2154,30 +2238,47 @@ async def on_ready():
     )
 
     print(
-        f"Servidor(es): {len(bot.guilds)}"
+        f"Servidores: {len(bot.guilds)}"
     )
 
-    print("=" * 50)
+    print(
+        "======================================"
+    )
 
-    await actualizar_top_staff()
+
+    for guild in bot.guilds:
+
+        try:
+
+            await actualizar_top_staff(
+                guild
+            )
+
+        except Exception as error:
+
+            print(
+                "[TOP] Error actualizando:"
+            )
+
+            print(
+                repr(error)
+            )
 
 
-# ============================================================
+# =========================================================
 # !TICKETPANEL
-# ============================================================
+# =========================================================
 
 @bot.command()
-async def ticketpanel(ctx):
+@commands.has_permissions(
+    administrator=True
+)
+async def ticketpanel(
+    ctx
+):
 
-    if not es_admin(ctx.author):
+    # Borrar paneles anteriores
 
-        await ctx.send(
-            "No tienes permisos para usar este comando."
-        )
-
-        return
-
-    # Borrar paneles anteriores del bot
     try:
 
         mensajes = []
@@ -2186,11 +2287,12 @@ async def ticketpanel(ctx):
             limit=50
         ):
 
-            if mensaje.author.id == bot.user.id:
+            if mensaje.author == bot.user:
 
                 mensajes.append(
                     mensaje
                 )
+
 
         for mensaje in mensajes:
 
@@ -2202,192 +2304,254 @@ async def ticketpanel(ctx):
 
                 pass
 
-    except Exception as e:
+
+    except Exception as error:
 
         print(
-            "ERROR LIMPIANDO PANEL:",
-            repr(e)
+            "[PANEL] Error limpiando:"
         )
 
+        print(
+            repr(error)
+        )
+
+
     embed = discord.Embed(
-        title="🎫 ¿Necesitas ayuda?",
+
+        title="🎫 Soporte InfernMC",
+
         description=(
 
-            "No dudes en abrir un ticket si necesitas "
-            "ayuda con cualquier situación relacionada "
-            "con **InfernMC**.\n\n"
+            "**¿Necesitas ayuda?**\n\n"
 
-            "## Ten en cuenta que\n"
+            "No dudes en abrir un ticket para "
+            "contactar con el Staff-Team.\n\n"
 
+            "**Ten en cuenta que:**\n"
             "• No abras demasiados tickets.\n"
-            "• No insultes ni faltes el respeto al Staff-Team.\n"
-            "• Explica tu problema de forma clara y directa.\n\n"
+            "• No insultes al Staff.\n"
+            "• Sé claro y directo con tu problema.\n\n"
 
-            "## Categorías disponibles\n\n"
+            "**Categorías disponibles:**\n\n"
 
             "🎲 **Ayuda General**\n"
-            "Para cualquier problema o duda general.\n\n"
+            "Problemas o dudas generales.\n\n"
 
             "🎗️ **Bugs**\n"
-            "Para reportar errores o problemas del servidor.\n\n"
+            "Reporta errores o problemas del servidor.\n\n"
 
-            f"{POSTULACIONES_EMOJI} **Postulaciones**\n"
-            "Para postularte al Staff-Team.\n\n"
+            f"<:{POSTULACIONES_EMOJI_NAME}:"
+            f"{POSTULACIONES_EMOJI_ID}> "
+            "**Postulaciones**\n"
+            "Postúlate para formar parte del Staff-Team.\n\n"
 
             "📯 **Tienda**\n"
-            "Para problemas relacionados con la tienda.\n\n"
+            "Problemas relacionados con la tienda.\n\n"
 
             "🗂️ **Sanciones**\n"
-            "Para apelar una sanción.\n\n"
+            "Apela una sanción recibida."
 
-            "**Selecciona una categoría en el menú "
-            "desplegable.**"
         ),
+
         color=discord.Color.red()
+
     )
+
 
     embed.set_footer(
-        text="InfernMC • Sistema de tickets"
-    )
 
-    await ctx.send(
-        embed=embed,
-        view=TicketPanelView()
-    )
-
-
-# ============================================================
-# !TOPSTAFFPANEL
-# ============================================================
-
-@bot.command()
-async def topstaffpanel(ctx):
-
-    if not es_admin(ctx.author):
-
-        await ctx.send(
-            "No tienes permisos para usar este comando."
+        text=(
+            "Selecciona una categoría en el menú desplegable."
         )
 
-        return
+    )
+
+
+    await ctx.send(
+
+        embed=embed,
+
+        view=TicketPanelView()
+
+    )
+
+
+# =========================================================
+# !TOPSTAFFPANEL
+# =========================================================
+
+@bot.command()
+@commands.has_permissions(
+    administrator=True
+)
+async def topstaffpanel(
+    ctx
+):
 
     embed = discord.Embed(
-        title="🏆 TOP 10 STAFF",
-        description=(
-            "**Clasificación semanal**\n\n"
 
-            "El ranking se actualiza automáticamente.\n\n"
+        title="🏆 TOP 10 STAFF",
+
+        description=(
+
+            "Clasificación semanal del Staff.\n\n"
 
             "**Sistema de puntos**\n"
-            "🎫 Ticket reclamado → **+3**\n"
+            "📌 Reclamar ticket → **+3**\n"
             "⭐ Valoración → **+1 a +5**\n"
-            "🤖 IA → **+0 a +10**"
+            "🤖 Evaluación IA → **+0 a +10**"
+
         ),
+
         color=discord.Color.red()
+
     )
+
 
     embed.add_field(
+
         name="Ranking",
-        value=(
-            "Todavía no hay puntos registrados."
-        ),
+
+        value="Cargando ranking...",
+
         inline=False
+
     )
 
-    embed.set_footer(
-        text=f"InfernMC • Semana {semana_actual()}"
-    )
 
     mensaje = await ctx.send(
         embed=embed
     )
 
-    cursor.execute(
-        """
-        INSERT OR REPLACE INTO config
-        (key, value)
 
-        VALUES
-        ('top_channel', ?)
+    cursor.execute(
+
+        """
+        INSERT OR REPLACE INTO config (
+            key,
+            value
+        )
+        VALUES (
+            'top_channel',
+            ?
+        )
         """,
+
         (
             str(ctx.channel.id),
         )
+
     )
 
-    cursor.execute(
-        """
-        INSERT OR REPLACE INTO config
-        (key, value)
 
-        VALUES
-        ('top_message', ?)
+    cursor.execute(
+
+        """
+        INSERT OR REPLACE INTO config (
+            key,
+            value
+        )
+        VALUES (
+            'top_message',
+            ?
+        )
         """,
+
         (
             str(mensaje.id),
         )
+
     )
+
 
     db.commit()
 
-    await ctx.send(
-        "Panel de Top Staff configurado."
+
+    await actualizar_top_staff(
+        ctx.guild
     )
 
 
-# ============================================================
+# =========================================================
 # !TOPSTAFF
-# ============================================================
+# =========================================================
 
 @bot.command()
-async def topstaff(ctx):
+async def topstaff(
+    ctx
+):
 
     top = obtener_top_staff()
 
+
     embed = discord.Embed(
+
         title="🏆 TOP 10 STAFF",
+
         color=discord.Color.red()
+
     )
+
 
     if not top:
 
         embed.description = (
-            "Todavía no hay puntos registrados."
+            "Todavía no hay Staff con puntos."
         )
 
     else:
 
-        texto = ""
+        lineas = []
+
 
         for posicion, datos in enumerate(
             top,
             start=1
         ):
 
-            user_id = datos[0]
-            weekly = datos[1]
-            total = datos[2]
+            (
+                user_id,
+                weekly,
+                total,
+                tickets,
+                ratings,
+                ai_points
+            ) = datos
 
-            texto += (
-                f"**#{posicion} <@{user_id}>**\n"
-                f"└ Semanal: **{weekly}**\n"
-                f"└ Total: **{total}**\n\n"
+
+            miembro = ctx.guild.get_member(
+                user_id
             )
 
-        embed.description = texto
 
-    embed.set_footer(
-        text=f"InfernMC • Semana {semana_actual()}"
-    )
+            nombre = (
+                miembro.mention
+                if miembro
+                else f"<@{user_id}>"
+            )
+
+
+            lineas.append(
+
+                f"**#{posicion}** {nombre} "
+                f"→ **{weekly} puntos**"
+
+            )
+
+
+        embed.description = "\n".join(
+            lineas
+        )
+
 
     await ctx.send(
         embed=embed
     )
 
 
-# ============================================================
+# =========================================================
 # !STAFF
-# ============================================================
+# =========================================================
 
 @bot.command()
 async def staff(
@@ -2399,11 +2563,9 @@ async def staff(
 
         miembro = ctx.author
 
-    asegurar_staff(
-        miembro.id
-    )
 
     cursor.execute(
+
         """
         SELECT
             total_points,
@@ -2412,137 +2574,165 @@ async def staff(
             ratings_received,
             ai_reviews,
             ai_points
-
         FROM staff
-
         WHERE user_id = ?
         """,
+
         (
             miembro.id,
         )
+
     )
+
 
     datos = cursor.fetchone()
 
-    if not datos:
+
+    if datos is None:
+
+        await ctx.send(
+            "Este Staff todavía no tiene estadísticas."
+        )
+
         return
 
+
+    (
+        total,
+        weekly,
+        tickets,
+        ratings,
+        ai_reviews,
+        ai_points
+    ) = datos
+
+
     embed = discord.Embed(
-        title="📊 Estadísticas Staff",
+
+        title=f"📊 Estadísticas de {miembro.display_name}",
+
         color=discord.Color.red()
+
     )
 
-    embed.set_thumbnail(
-        url=miembro.display_avatar.url
-    )
 
     embed.add_field(
-        name="Staff",
-        value=miembro.mention,
-        inline=False
-    )
 
-    embed.add_field(
         name="Puntos semanales",
-        value=f"**{datos[1]}**",
+
+        value=str(weekly),
+
         inline=True
+
     )
 
+
     embed.add_field(
+
         name="Puntos totales",
-        value=f"**{datos[0]}**",
+
+        value=str(total),
+
         inline=True
+
     )
 
+
     embed.add_field(
+
         name="Tickets reclamados",
-        value=str(datos[2]),
+
+        value=str(tickets),
+
         inline=True
+
     )
 
+
     embed.add_field(
+
         name="Valoraciones",
-        value=str(datos[3]),
+
+        value=str(ratings),
+
         inline=True
+
     )
 
+
     embed.add_field(
+
         name="Evaluaciones IA",
-        value=str(datos[4]),
+
+        value=str(ai_reviews),
+
         inline=True
+
     )
+
 
     embed.add_field(
+
         name="Puntos IA",
-        value=f"**{datos[5]}**",
+
+        value=str(ai_points),
+
         inline=True
+
     )
 
-    embed.set_footer(
-        text="InfernMC • Estadísticas Staff"
-    )
 
     await ctx.send(
         embed=embed
     )
 
 
-# ============================================================
+# =========================================================
 # !TESTBIENVENIDA
-# ============================================================
+# =========================================================
 
 @bot.command()
-async def testbienvenida(ctx):
-
-    if not es_admin(ctx.author):
-
-        await ctx.send(
-            "No tienes permisos para usar este comando."
-        )
-
-        return
+@commands.has_permissions(
+    administrator=True
+)
+async def testbienvenida(
+    ctx
+):
 
     await enviar_bienvenida(
         ctx.author
     )
 
-    await ctx.send(
-        "Bienvenida de prueba enviada."
-    )
 
-
-# ============================================================
+# =========================================================
 # !MENSAJE
-# ============================================================
+# =========================================================
 
 @bot.command()
+@commands.has_permissions(
+    administrator=True
+)
 async def mensaje(
     ctx,
     canal: discord.TextChannel,
     *,
-    texto
+    contenido: str
 ):
 
-    if not es_admin(ctx.author):
-
-        await ctx.send(
-            "No tienes permisos para usar este comando."
-        )
-
-        return
-
     await canal.send(
-        texto
+        contenido
     )
+
 
     await ctx.send(
-        "Mensaje enviado."
+        f"Mensaje enviado a {canal.mention}.",
+        delete_after=5
     )
 
 
-# ============================================================
+# =========================================================
 # ERRORES DE COMANDOS
-# ============================================================
+# =========================================================
 
 @bot.event
 async def on_command_error(
@@ -2552,31 +2742,42 @@ async def on_command_error(
 
     if isinstance(
         error,
-        commands.CommandNotFound
-    ):
-
-        return
-
-    if isinstance(
-        error,
-        commands.MissingRequiredArgument
+        commands.MissingPermissions
     ):
 
         await ctx.send(
-            "Faltan argumentos para usar este comando."
+            "No tienes permisos para utilizar este comando.",
+            delete_after=5
         )
 
         return
 
+
+    if isinstance(
+        error,
+        commands.MemberNotFound
+    ):
+
+        await ctx.send(
+            "No encontré ese usuario.",
+            delete_after=5
+        )
+
+        return
+
+
     print(
-        f"ERROR COMANDO {ctx.command}:",
+        "[COMMAND ERROR]"
+    )
+
+    print(
         repr(error)
     )
 
 
-# ============================================================
+# =========================================================
 # INICIAR
-# ============================================================
+# =========================================================
 
 if not TOKEN:
 
@@ -2585,4 +2786,6 @@ if not TOKEN:
     )
 
 
-bot.run(TOKEN)
+bot.run(
+    TOKEN
+)
