@@ -301,7 +301,6 @@ async def sumar_puntos(
         f"[STAFF] {staff_id} recibió +{puntos} puntos."
     )
 
-    # ACTUALIZA EL TOP AUTOMÁTICAMENTE
     await actualizar_topstaff_panel()
 
 
@@ -1551,7 +1550,6 @@ async def enviar_bienvenida(member):
         url=member.display_avatar.url
     )
 
-    # IMAGEN PRINCIPAL
     embed.set_image(
         url=WELCOME_IMAGE_URL
     )
@@ -1650,17 +1648,35 @@ async def ticketpanel(
             "¿Necesitas ayuda?\n\n"
             "No dudes en abrir un ticket para recibir "
             "asistencia por parte del Staff.\n\n"
+
             "**Ten en cuenta que:**\n"
             "• No abras demasiados tickets.\n"
             "• No insultes al Staff.\n"
             "• Sé claro y directo con tu problema.\n\n"
-            "Selecciona una categoría en el menú de abajo."
+
+            "**Categorías disponibles:**\n\n"
+
+            "🎲 **Ayuda General**\n"
+            "Necesitas ayuda con el servidor.\n\n"
+
+            "🎗️ **Bugs**\n"
+            "Reporta un error o bug.\n\n"
+
+            f"<:{POSTULACIONES_EMOJI_NAME}:{POSTULACIONES_EMOJI_ID}> "
+            "**Postulaciones**\n"
+            "Postúlate para formar parte del Staff-Team.\n\n"
+
+            "📯 **Tienda**\n"
+            "Problemas relacionados con la tienda.\n\n"
+
+            "🗂️ **Sanciones**\n"
+            "Apela una sanción."
         ),
         color=discord.Color.red()
     )
 
     embed.set_footer(
-        text="InfernMC • Selecciona una categoría"
+        text="InfernMC • Selecciona una categoría en el menú"
     )
 
     await canal.send(
